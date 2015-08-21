@@ -25,8 +25,7 @@ global proc buildScriptEditorCondensedPopupMenus(string $parent, int $isHistoryP
 	menuItem -radialPosition "E" 
 			 -parent $parent 
 			 -label (uiRes("m_scriptEditorPanel.kSelectNextTab"))
-			 -command "handleScriptEditorAction \"selectNextExecuterTab\"";	
-  
+			 -command "handleScriptEditorAction \"selectNextExecuterTab\"";	 
 	$deleteSM = `menuItem -radialPosition "SE" 
 			 -parent $parent 
 			 -subMenu true
@@ -99,7 +98,7 @@ global proc buildScriptEditorCondensedPopupMenus(string $parent, int $isHistoryP
 				 -parent $parent
 				 -command "handleScriptEditorAction \"clearAll\"";						
 	}
-			
+
 	//ADD HACKS ===============================================================
 	source red9MayaHacks;
 	red9HackScriptEditorPopup $parent;	
@@ -192,7 +191,7 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 			-annotation (uiRes("m_loadAnimMenuLibrary.kMakeLinearBeforeAnnot")) 
 			-command ("doSetInfinity \"-pri linear\" " + $selectionConnection + " " + "\"" + $options + "\"");
 		menuItem -label (uiRes("m_loadAnimMenuLibrary.kConstant")) 
-			-annotation (uiRes("m_loadAnimMenuLibrary.kConstantBeforeAnnot")) 			
+			-annotation (uiRes("m_loadAnimMenuLibrary.kConstantBeforeAnnot"))
 			-command ("doSetInfinity \"-pri constant\" " + $selectionConnection + " " + "\"" + $options + "\"");
 	setParent -m ..; 
 
@@ -207,10 +206,10 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 			-annotation (uiRes("m_loadAnimMenuLibrary.kOscillateAfterAnnot")) 
 			-command ("doSetInfinity \"-poi oscillate\" " + $selectionConnection + " " + "\"" + $options + "\"");
 		menuItem -label `uiRes( "m_loadAnimMenuLibrary.kLinear" )`
-			-annotation (uiRes("m_loadAnimMenuLibrary.kLinearAfterAnnot")) 			
+			-annotation (uiRes("m_loadAnimMenuLibrary.kLinearAfterAnnot"))
 			-command ("doSetInfinity \"-poi linear\" " + $selectionConnection + " " + "\"" + $options + "\"");
 		menuItem -label `uiRes( "m_loadAnimMenuLibrary.kConstant" )`
-			-annotation (uiRes("m_loadAnimMenuLibrary.kConstantAfterAnnot")) 			
+			-annotation (uiRes("m_loadAnimMenuLibrary.kConstantAfterAnnot"))
 			-command ("doSetInfinity \"-poi constant\" " + $selectionConnection + " " + "\"" + $options + "\"");
 	setParent -m ..; 
 
@@ -323,12 +322,12 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 		simplifyOptionsItem;
 
 	menuItem -label (uiRes("m_loadAnimMenuLibrary.kEulerFilter")) 
-		-annotation (uiRes("m_loadAnimMenuLibrary.kEulerFilterAnnot")) 		
+		-annotation (uiRes("m_loadAnimMenuLibrary.kEulerFilterAnnot"))
 		-c ("performEulerFilter " + $realSelectionConnection)
 		eulerFilterItem;
 
 	menuItem -label (uiRes("m_loadAnimMenuLibrary.kResampleCurve")) 
-		-annotation (uiRes("m_loadAnimMenuLibrary.kResampleCurveAnnot")) 				
+		-annotation (uiRes("m_loadAnimMenuLibrary.kResampleCurveAnnot"))	
 		-c ("performResample " + $performBase + " " + $selectionConnection)
 		-dragMenuCommand( "performResample " + ($performBase + 2) + " \"" +
 						   $selectionConnection + "\"")
@@ -337,7 +336,7 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 		-annotation (uiRes("m_loadAnimMenuLibrary.kResampleCurveOptions")) 
 		-c ("performResample " + ($performBase + 1) + " " + $selectionConnection)
 		resampleOptionsItem;
-		
+
 	menuItem -label (uiRes("m_loadAnimMenuLibrary.kSpreadsheet")) 
 		-annotation (uiRes("m_loadAnimMenuLibrary.kSpreadsheetAnnot")) 
 		-command ("OpenAnimSpreadsheet " + $realSelectionConnection)
@@ -360,7 +359,7 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 				bufferReferenceItem;
 			setParent -m ..;
 		menuItem -label (uiRes("m_loadAnimMenuLibrary.kSwapBufferCurve")) 
-			-annotation (uiRes("m_loadAnimMenuLibrary.kSwapBufferCurveAnnot")) 			
+			-annotation (uiRes("m_loadAnimMenuLibrary.kSwapBufferCurveAnnot"))
 			-command "bufferCurve -animation \"keys\" -swap"
 			bufferSwapItem;
 	}
@@ -371,7 +370,7 @@ buildCurvesMenu (string $editor, string $animEditor, string $parentMenu, string 
 		-annotation (uiRes("m_loadAnimMenuLibrary.kNonWeightTangentsAnnot")) 
 		-command ("doKeyTangent \"-edit -weightedTangents false\" " + $selectionConnection + " " + "\"" + $options + "\"");
 	menuItem -label (uiRes("m_loadAnimMenuLibrary.kWeightTangents")) 
-		-annotation (uiRes("m_loadAnimMenuLibrary.kWeightTangentsAnnot")) 		
+		-annotation (uiRes("m_loadAnimMenuLibrary.kWeightTangentsAnnot"))
 		-command ("doKeyTangent \"-edit -weightedTangents true\" " + $selectionConnection + " " + "\"" + $options + "\"");
 
 	if ($buildMenuCommand != "") {
@@ -478,9 +477,9 @@ global proc generateChannelMenu( string $parent, int $popupMenu )
 		
 		menuItem -d true;
 		
-		menuItem -label (uiRes("m_generateChannelMenu.kAddToSelectedLayers")) -c "channelBoxCommand -addToLayers" addToLayersItem;
-		menuItem -label (uiRes("m_generateChannelMenu.kRemoveFromSelectedLayers")) -c "channelBoxCommand -removeFromLayers" removeFromLayersItem;
-				
+		menuItem -ltVersion 2016 -label (uiRes("m_generateChannelMenu.kAddToSelectedLayers")) -c "channelBoxCommand -addToLayers" addToLayersItem;
+		menuItem -ltVersion 2016 -label (uiRes("m_generateChannelMenu.kRemoveFromSelectedLayers")) -c "channelBoxCommand -removeFromLayers" removeFromLayersItem;
+		
 		//ADD HACKS ===============================================================
 		source red9MayaHacks;
 		red9HackChannelBox $parent;
@@ -509,7 +508,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorFileMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menu = `menu -label (uiRes("m_ClipEdMenu.kEditMenu"))   -tearOff true
+	$menu = `menu -label (uiRes("m_ClipEdMenu.kEditMenu"))   -tearOff true
 		-familyImage "menuIconEdit.png"
 		-allowOptionBoxes true`;
 
@@ -517,7 +516,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorEditMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menu = `menu -label (uiRes("m_ClipEdMenu.kViewMenu"))   -tearOff true
+	$menu = `menu -label (uiRes("m_ClipEdMenu.kViewMenu"))   -tearOff true
 		-allowOptionBoxes true
 		-familyImage "menuIconEdit.png"`;
 
@@ -525,7 +524,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorViewMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menu = `menu -label (uiRes("m_ClipEdMenu.kModifyMenu"))   -tearOff true
+	$menu = `menu -label (uiRes("m_ClipEdMenu.kModifyMenu"))   -tearOff true
 		-allowOptionBoxes true
 		-familyImage "menuIconEdit.png"`;
 
@@ -533,7 +532,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorClipMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menu = `menu -label (uiRes("m_ClipEdMenu.kCreateMenu"))   -tearOff true
+	$menu = `menu -label (uiRes("m_ClipEdMenu.kCreateMenu"))   -tearOff true
 		-allowOptionBoxes true
 		-familyImage "menuIconEdit.png"`;
 
@@ -541,7 +540,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorCreateMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menu = `menu -label (uiRes("m_ClipEdMenu.kLibraryMenu"))   -tearOff true
+	$menu = `menu -label (uiRes("m_ClipEdMenu.kLibraryMenu"))   -tearOff true
 		-familyImage "menuIconEdit.png"
 		-allowOptionBoxes true`;
 
@@ -549,7 +548,7 @@ global proc buildClipEditorMenu(string $editor, string $parent,
 		("buildClipEditorLibraryMenu " + $editor + " " + $menu) $menu;
 	setParent -menu ..;
 
-	string $menuItem = `menu -label (uiRes("m_ClipEdMenu.kListMenu"))  
+	$menuItem = `menu -label (uiRes("m_ClipEdMenu.kListMenu"))  
 			-tearOff true
 			-familyImage "menuIconOptions.png"`;
 		defineListMenu "useCharacters" $editor $editor $menuItem "";

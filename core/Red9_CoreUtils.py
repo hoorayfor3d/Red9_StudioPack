@@ -20,6 +20,7 @@ from functools import partial
 import re
 import random
 import math
+import os
 
 import Red9.packages.configobj as configobj
 import Red9.startup.setup as r9Setup
@@ -34,10 +35,11 @@ logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+# Language map is used for all UI's as a text mapping for languages
+LANGUAGE_MAP = r9Setup.LANGUAGE_MAP
 
 
-# Generic  Functions
-#---------------------------------------------------------------------------------
+# Generic Functions --------------------------------------------------------------
 
 def nodeNameStrip(node):
     '''
@@ -46,39 +48,63 @@ def nodeNameStrip(node):
     '''
     return node.split('|')[-1].split(':')[-1]
 
-
-def prioritizeNodeList(nList, priorityList, regex=True, prioritysOnly=False):
+@r9General.Timer
+def prioritizeNodeList(inputlist, priorityList, regex=True, prioritysOnly=False):
     '''
     Simple function to force the order of a given nList such that nodes
     in the given priority list are moved to the front of the list.
     
-    :param nList: main input list
+    :param inputlist: main input list
     :param priorityList: list which is used to prioritize/order the main nList
+    :param regex: Switches from regex search to simple exact node name
+    :param prioritysOnly: return just the priorityList matches or the entire list sorted
+    
+    #Known issue, if Regex=True and you have 2 similar str's in the priority list then there's 
+    a chance that matching may be erractic... 
+    
+    priorityList=['upperLip','l_upperLip']
+    nodes=['|my|dag|path|jaw',|my|dag|path|l_upperLip','|my|dag|path|upperLip','|my|dag|path|lowerLip']
+    returns: ['|my|dag|path|l_upperLip','|my|dag|path|upperLip',|my|dag|path|jaw,'|my|dag|path|lowerLip]
+    
+    as in regex 'l_upperLip'=='upperLip' as well as 'upperLip'=='upperLip' 
+    
+    really in regex you'd need to be more specific:  priorityList=['^upperLip','l_upperLip']
     '''
-    stripped = [nodeNameStrip(node) for node in nList]  # stripped back to nodeName
+    #stripped = [nodeNameStrip(node) for node in inputlist]  # stripped back to nodeName
+    nList=list(inputlist)  # take a copy so we don't mutate the input list
     reordered = []
     
     if regex:
+        # this will match all partial matches within the inputList
+        #print 'pList : ',priorityList
         for pNode in priorityList:
-            for index, node in enumerate(stripped):
-                if re.search(pNode, node):
-                    reordered.append(nList[index])
-                    nList.pop(index)
-                    stripped.remove(node)
+            for node in inputlist:
+                if re.search(pNode, nodeNameStrip(node)):
+                    #print 'matched : ', nodeNameStrip(node), pNode, node
+                    reordered.append(node)
+                    try:
+                        nList.remove(node)
+                    except:
+                        log.debug('node not in list or already removed: %s>> priority str : %s' % (nodeNameStrip(node), node))
+
     else:
+        # this is setup to match exact only
+        stripped = [nodeNameStrip(node) for node in inputlist]  # stripped back to nodeName
         for pNode in priorityList:
             if pNode in stripped:
                 index = stripped.index(pNode)
                 reordered.append(nList[index])
                 nList.pop(index)
                 stripped.pop(index)
+
     if not prioritysOnly:
         reordered.extend(nList)
-    # [log.debug('Prioritized Index: %i = %s  <: ORIGINALLY :>  %s' % (i,nodeNameStrip(reordered[i]),n))\
-    #     for i,n in enumerate(stripped)]
+        
+    #[log.debug('Prioritized Index: %i = %s  <: ORIGINALLY :>  %s' % (i,nodeNameStrip(reordered[i]),n)) for i,n in enumerate(stripped)]
+    
     return reordered
 
-     
+
 def sortNumerically(data):
     """
     Sort the given data in the way that humans expect.
@@ -172,9 +198,38 @@ def validateString(strText):
         raise ValueError('String contains illegal characters "%s" <in> "%s"' % (','.join(illegal), strText))
     else:
         return strText
+
+
+def filterListByString(input_list, filter_string, matchcase=False):
+    '''
+    Generic way to filter a list by a given string input. This is so that all
+    the filtering used in the UI's is consistent. Used by the poseSaver, facialUI,
+    MetaUI and many others.
+    
+    :param iniput_list: list of strings to be filtered
+    :param filter_string: string to use in the filter, supports comma separated search strings
+        eg : 'brows,smile,funnel'
+    :param matchcase: whether to match or ignore case sensitivity
+    '''
+    
+    if not matchcase:
+        filter_string=filter_string.upper()
+    filterBy=[f for f in filter_string.replace(' ','').rstrip(',').split(',') if f]
+    filteredList=[]
+    for item in input_list:
+        data=item
+        filterPattern='|'.join(n for n in filterBy)
+        regexFilter=re.compile('('+filterPattern+')')  # convert into a regularExpression
+        if not matchcase:
+            data=item.upper()
+        if regexFilter.search(data):
+            #print data,item,filterPattern
+            if not item in filteredList:
+                filteredList.append(item)
+    return filteredList
     
     
-#Filter Node Setups ----------------------------------------------------------------------
+# Filter Node Setups -------------------------------------------------------------
 
 class FilterNode_Settings(object):
     '''
@@ -258,6 +313,7 @@ class FilterNode_Settings(object):
     def resetFilters(self, rigData=True):
         '''
         reset the MAIN filter args only
+        
         :param rigData: this is a cached attr and not fully handled 
         by the UI hence the option NOT to reset, used by the UI presetFill calls
         '''
@@ -272,45 +328,11 @@ class FilterNode_Settings(object):
         self.infoBlock=""
         if rigData:
             self.rigData={}
-        
-#    def write(self,filepath):
-#        '''
-#        write the filterSettings attribute out to a ConfigFile
-#        @param filepath: file path to write the configFile out to
-#        '''
-#        config = ConfigParser.RawConfigParser()
-#        config.optionxform=str #prevent options being converted to lowerCase
-#        config.add_section('filterNode_settings')
-#        for key, val in self.__dict__.items():
-#            config.set('filterNode_settings', key, val)
-#
-#        # Writing our configuration file to 'example.cfg'
-#        with open(filepath, 'wb') as configfile:
-#            config.write(configfile)
-
-#    def read(self,filepath):
-#        '''
-#        Read a given ConfigFile and fill this object instance with the data
-#        @param filepath: file path to write the configFile out to
-#        '''
-#        config = ConfigParser.RawConfigParser()
-#        config.optionxform=str #prevent options being converted to lowerCase
-#        config.read(filepath)
-#
-#        self.resetFilters()
-#
-#        settings=dict(config.items("filterNode_settings"))
-#        for key,val in settings.items():
-#            #because config is built from string data
-#            #we need to deal with specific types here
-#            try:
-#                self.__dict__[key]=decodeString(val)
-#            except:
-#                pass
-                  
+                          
     def write(self, filepath):
         '''
         write the filterSettings attribute out to a ConfigFile
+        
         :param filepath: file path to write the configFile out to
         '''
         ConfigObj = configobj.ConfigObj(indent_type='\t')
@@ -322,9 +344,20 @@ class FilterNode_Settings(object):
     def read(self, filepath):
         '''
         Read a given ConfigFile and fill this object instance with the data
+        
         :param filepath: file path to write the configFile out to
+        
+        ::note ..
+            If filepath doesn't exists or you pass in just the short name of the config you 
+            want to load then we try and find a matching config in the default presets dir in Red9
         '''
         self.resetFilters()
+        
+        # have we passed in just the short name of an existing preset in the default dir?
+        if not os.path.exists(filepath):
+            if os.path.exists(os.path.join(r9Setup.red9Presets(),filepath)):
+                filepath=os.path.join(r9Setup.red9Presets(),filepath)
+                
         for key, val in configobj.ConfigObj(filepath)['filterNode_settings'].items():
             #because config is built from string data
             #we need to deal with specific types here
@@ -334,8 +367,7 @@ class FilterNode_Settings(object):
                 pass
 
   
-# UI CALLS :
-#---------------------------------------------------------------------------------
+# UI CALLS -----------------------------------------------------------------------
     
 class FilterNode_UI(object):
 
@@ -354,83 +386,83 @@ class FilterNode_UI(object):
         
         if cmds.window(self.win, exists=True):
             cmds.deleteUI(self.win, window=True)
-        window = cmds.window(self.win, title="Node Searcher", widthHeight=(400, 400))
+        window = cmds.window(self.win, title=LANGUAGE_MAP._SearchNodeUI_.title, widthHeight=(400, 400))
         cmds.menuBarLayout()
-        cmds.menu(l="VimeoHelp")
-        cmds.menuItem(l="Open Vimeo Help File",\
+        cmds.menu(l=LANGUAGE_MAP._Generic_.vimeo_menu)
+        cmds.menuItem(l=LANGUAGE_MAP._Generic_.vimeo_help,\
                       c="import Red9.core.Red9_General as r9General;r9General.os_OpenFile('https://vimeo.com/56551684')")
         cmds.menuItem(divider=True)
-        cmds.menuItem(l="Contact Me", c=lambda *args: (r9Setup.red9ContactInfo()))
+        cmds.menuItem(l=LANGUAGE_MAP._Generic_.contactme, c=lambda *args: (r9Setup.red9ContactInfo()))
         self.MainLayout=cmds.columnLayout(adjustableColumn=True)
-        cmds.frameLayout(label='Complex Node Search', cll=True, borderStyle='etchedOut')
+        cmds.frameLayout(label=LANGUAGE_MAP._SearchNodeUI_.complex_node_search, cll=True, borderStyle='etchedOut')
         cmds.columnLayout(adjustableColumn=True)
         cmds.separator(h=15, style='none')
         
         #====================
         # Intersector
         #====================
-        cmds.rowColumnLayout(ann='nodeTypeSelectors', numberOfColumns=3, columnWidth=[(1, 130), (2, 130), (3, 130)], columnSpacing=[(1, 10)])
-        cmds.checkBox(l='NurbsCurve', v=False,
+        cmds.rowColumnLayout(ann=LANGUAGE_MAP._SearchNodeUI_.complex_node_search_ann, numberOfColumns=3, columnWidth=[(1, 130), (2, 130), (3, 130)], columnSpacing=[(1, 10)])
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.nurbs_curve, v=False,
                         onc=lambda x: self.cbNodeTypes.append('nurbsCurve'),
                         ofc=lambda x: self.cbNodeTypes.remove('nurbsCurve'))
-        cmds.checkBox(l='Meshes', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.meshes, v=False,
                         onc=lambda x: self.cbNodeTypes.append('mesh'),
                         ofc=lambda x: self.cbNodeTypes.remove('mesh'))
-        cmds.checkBox(l='Joints', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.joints, v=False,
                         onc=lambda x: self.cbNodeTypes.append('joint'),
                         ofc=lambda x: self.cbNodeTypes.remove('joint'))
-        cmds.checkBox(l='Locators', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.locators, v=False,
                         onc=lambda x: self.cbNodeTypes.append('locator'),
                         ofc=lambda x: self.cbNodeTypes.remove('locator'))
-        cmds.checkBox(l='Cameras', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.cameras, v=False,
                         onc=lambda x: self.cbNodeTypes.append('camera'),
                         ofc=lambda x: self.cbNodeTypes.remove('camera'))
-        cmds.checkBox(l='Audio', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.audio, v=False,
                         onc=lambda x: self.cbNodeTypes.append('audio'),
                         ofc=lambda x: self.cbNodeTypes.remove('audio'))
-        cmds.checkBox(l='OrientConstraint', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.orient_constraint, v=False,
                         onc=lambda x: self.cbNodeTypes.append('orientConstraint'),
                         ofc=lambda x: self.cbNodeTypes.remove('orientConstraint'))
-        cmds.checkBox(l='PointConstraint', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.point_constraint, v=False,
                         onc=lambda x: self.cbNodeTypes.append('pointConstraint'),
                         ofc=lambda x: self.cbNodeTypes.remove('pointConstraint'))
-        cmds.checkBox(l='ParentConstraint', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.parent_constraint, v=False,
                         onc=lambda x: self.cbNodeTypes.append('parentConstraint'),
                         ofc=lambda x: self.cbNodeTypes.remove('parentConstraint'))
-        cmds.checkBox(l='IKHandles', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.ik_handles, v=False,
                         onc=lambda x: self.cbNodeTypes.append('ikHandle'),
                         ofc=lambda x: self.cbNodeTypes.remove('ikHandle'))
-        cmds.checkBox(l='Transforms', v=False,
+        cmds.checkBox(l=LANGUAGE_MAP._Generic_.transforms, v=False,
                         onc=lambda x: self.cbNodeTypes.append('transform'),
                         ofc=lambda x: self.cbNodeTypes.remove('transform'))
         cmds.setParent('..')
 
         cmds.separator(h=20, st='in')
-        self.uiSpecificNodeTypes = cmds.textFieldGrp(ann='Specific NodeTypes to look for - separated by ,',
-                                            label='Specific NodeTypes', cw=[(1, 120)], text="")
-        self.uiSpecificAttrs = cmds.textFieldGrp(ann='Search for specific Attributes on nodes, list separated by ","',
-                                            label='Search Attributes', cw=[(1, 120)], text="")
-        self.uiSpecificPattern = cmds.textFieldGrp(label='Search Name Pattern', cw=[(1, 120)], text="",
-                                            ann='Search for specific nodeName Patterns, list separated by "," - Note this is a Python.regularExpression - ^ clamps to the start, $ clamps to the end')
+        self.uiSpecificNodeTypes = cmds.textFieldGrp(ann=LANGUAGE_MAP._SearchNodeUI_.search_nodetypes_ann,
+                                            label=LANGUAGE_MAP._SearchNodeUI_.search_nodetypes, cw=[(1, 120)], text="")
+        self.uiSpecificAttrs = cmds.textFieldGrp(ann=LANGUAGE_MAP._SearchNodeUI_.search_attributes_ann,
+                                            label=LANGUAGE_MAP._SearchNodeUI_.search_attributes, cw=[(1, 120)], text="")
+        self.uiSpecificPattern = cmds.textFieldGrp(label=LANGUAGE_MAP._SearchNodeUI_.search_pattern, cw=[(1, 120)], text="",
+                                            ann=LANGUAGE_MAP._SearchNodeUI_.search_pattern_ann)
         cmds.separator(h=20, st='in')
         cmds.rowColumnLayout(numberOfColumns=2, columnWidth=[(1, 130), (2, 230)], columnSpacing=[(1, 10)])
        
-        self.uiCbFromSelected = cmds.checkBox(ann='Process Selected Hierarchies or all Scene Nodes',
-                                            label='From Selected', al='left', v=True)
-        self.uiCbKwsTransOnly = cmds.checkBox(ann='Clamp the filter to only return the Transform Nodes, by-passes any shapes or nodeTypes with Transforms as parents',
-                        label='Return Transforms were applicable', al='left',
+        self.uiCbFromSelected = cmds.checkBox(ann=LANGUAGE_MAP._SearchNodeUI_.from_selected_ann,
+                                            label=LANGUAGE_MAP._SearchNodeUI_.from_selected, al='left', v=True)
+        self.uiCbKwsTransOnly = cmds.checkBox(ann=LANGUAGE_MAP._SearchNodeUI_.return_transforms_ann,
+                        label=LANGUAGE_MAP._SearchNodeUI_.return_transforms, al='left',
                         v=self._filterNode.settings.transformClamp)
         cmds.separator(h=5, style='none')
         cmds.separator(h=5, style='none')
-        self.uiCbKwsIncRoots = cmds.checkBox(ann='Include the originalRoots in the selection',
-                        label='Include Roots', al='left',
+        self.uiCbKwsIncRoots = cmds.checkBox(ann=LANGUAGE_MAP._SearchNodeUI_.include_roots_ann,
+                        label=LANGUAGE_MAP._SearchNodeUI_.include_roots, al='left',
                         v=self._filterNode.settings.incRoots)
         cmds.setParent('..')
         cmds.separator(h=10, style='none')
-        cmds.button(label='Intersection Search - All Above Fields', bgc=r9Setup.red9ButtonBGC(1),
+        cmds.button(label=LANGUAGE_MAP._SearchNodeUI_.intersection_search, bgc=r9Setup.red9ButtonBGC(1),
                      command=lambda *args: (self.__uiCall('intersection')))
         cmds.separator(h=20, st='in')
-        cmds.button(label='Simple Hierarchy', bgc=r9Setup.red9ButtonBGC(2),
+        cmds.button(label=LANGUAGE_MAP._SearchNodeUI_.simple_hierarchy, bgc=r9Setup.red9ButtonBGC(2),
                      command=lambda *args: (self.__uiCall('FullHierarchy')))
         cmds.setParent(self.MainLayout)
         cmds.separator(h=15, style='none')
@@ -1201,6 +1233,14 @@ class FilterNode(object):
     # Main Search Call which uses the Settings Object
     #---------------------------------------------------------------------------------
     
+    
+    def processFilter(self):
+        '''
+        replace the 'P' in the function call but not depricating it just yet
+        as too much code both internally and externally relies on this method
+        '''
+        return self.ProcessFilter()
+        
     #@r9General.Timer
     def ProcessFilter(self):
             '''
@@ -1290,8 +1330,8 @@ class FilterNode(object):
                   
             return self.intersectionData
 
-
-def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=1):
+    
+def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=4):  # levels=1)
     '''
     quick func to return the blendshape targets found from a give mesh's connected blendshape's
     
@@ -1304,7 +1344,6 @@ def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=1):
     :param returnAll: if multiple blendshapes are found do we return all, or just the first
     :param levels: same as the 'levels' flag in listHistory as that's ultimately what grabs the blendShape nodes here
     '''
-
     if asList:
         targetData=[]
     else:
@@ -1314,21 +1353,37 @@ def getBlendTargetsFromMesh(node, asList=True, returnAll=False, levels=1):
     if blendshapes:
         for blend in blendshapes:
             weights=cmds.aliasAttr(blend,q=True)
-            if asList:
-                data=weights[0::2]
-                if returnAll:
-                    targetData.extend(data)
+            if weights:
+                data=zip(weights[1::2], weights[0::2])
+                weightKey=lambda x:int(x[0].replace('weight[','').replace(']',''))
+                weightSorted=sorted(data, key=weightKey)
+                if asList:
+                    data=[t for _, t in weightSorted]
+                    if returnAll:
+                        targetData.extend(data)
+                    else:
+                        #means we only return the first blend in the history
+                        return data
                 else:
-                    #means we only return the first blend in the history
-                    return data
-            else:
-                data=(zip(weights[1::2],weights[0::2]))
-                targetData[blend]=data
+                    targetData[blend] = weightSorted
     return targetData
+
+def getBlendTargetIndex(blendNode, targetName):
+    '''
+    given a blendshape node return the weight index for a given targetName
     
+    :param blendNode: blendShape node to inspect
+    :param targetName: target Alias Name of the channel we're trying to find the index for
+    '''
+    weights=cmds.aliasAttr(blendNode,q=True)
+    if weights:
+        if targetName in weights:
+            return int(weights[weights.index(targetName) + 1].replace('weight[','').replace(']',''))
+    else:
+        return 0
     
 
-#Node Matching -------------------------------------------------------------------------
+# Node Matching ----------------------------------------------------------------------
             
 def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
     '''
@@ -1353,12 +1408,15 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
     
     #take a copy of B as we modify the data here
     hierarchyB=list(nodeListB)
-    
+    if matchMethod == 'mirrorIndex':
+        getMirrorID=r9Anim.MirrorHierarchy().getMirrorCompiledID
     if matchMethod == 'index':
         matchedData = zip(nodeListA,nodeListB)
     else:
         for nodeA in nodeListA:
             strippedA = nodeNameStrip(nodeA)
+            if matchMethod == 'mirrorIndex':
+                indexA=getMirrorID(nodeA)
             for nodeB in hierarchyB:
                 #strip the path off for the compare
                 #strippedA = nodeNameStrip(nodeA)
@@ -1382,7 +1440,16 @@ def matchNodeLists(nodeListA, nodeListB, matchMethod='stripPrefix'):
                         matchedData.append((nodeA, nodeB))
                         hierarchyB.remove(nodeB)
                         break
-                
+                    
+                #Compare using the nodes internal mirrorIndex if found
+                elif matchMethod == 'mirrorIndex':
+                    if indexA and indexA==getMirrorID(nodeB):
+                        infoPrint += '\nMatch Method : %s : %s == %s' % \
+                                (matchMethod, nodeA.split('|')[-1], nodeB.split('|')[-1])
+                        matchedData.append((nodeA, nodeB))
+                        hierarchyB.remove(nodeB)
+                        break
+                    
     log.debug('\nMatched Log : \n%s' % infoPrint)
     infoPrint = None
     return matchedData
@@ -1512,7 +1579,6 @@ class MatchedNodeInputs(object):
 
 
 class LockChannels(object):
-    
     '''
     Simple UI to manage the lock and key status of nodes
     '''
@@ -1534,118 +1600,118 @@ class LockChannels(object):
         def _showUI(self):
             if cmds.window(self.win, exists=True):
                 cmds.deleteUI(self.win, window=True)
-            window = cmds.window(self.win, title="LockChannels", s=False, widthHeight=(260, 410))
+            window = cmds.window(self.win, title=LANGUAGE_MAP._LockChannelsUI_.title, s=False, widthHeight=(260, 410))
             cmds.menuBarLayout()
-            cmds.menu(l="VimeoHelp")
-            cmds.menuItem(l="Open Vimeo Help File", \
+            cmds.menu(l=LANGUAGE_MAP._Generic_.vimeo_menu)
+            cmds.menuItem(l=LANGUAGE_MAP._Generic_.vimeo_help, \
                           c="import Red9.core.Red9_General as r9General;r9General.os_OpenFile('https://vimeo.com/58664502')")
             cmds.menuItem(divider=True)
-            cmds.menuItem(l="Contact Me", c=lambda *args: (r9Setup.red9ContactInfo()))
+            cmds.menuItem(l=LANGUAGE_MAP._Generic_.contactme, c=lambda *args: (r9Setup.red9ContactInfo()))
             cmds.columnLayout(adjustableColumn=True, columnAttach=('both', 5))
             cmds.separator(h=15, style='none')
-            cmds.rowColumnLayout(ann='attrs', numberOfColumns=4,
+            cmds.rowColumnLayout(ann=LANGUAGE_MAP._Generic_.attrs, numberOfColumns=4,
                                  columnWidth=[(1, 50), (2, 50), (3, 50)])
            
-            cmds.checkBox('tx', l='Tx', v=False,
+            cmds.checkBox('tx', l=LANGUAGE_MAP._Generic_.tx, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "tx"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "tx"))
-            cmds.checkBox('ty', l='Ty', v=False,
+            cmds.checkBox('ty', l=LANGUAGE_MAP._Generic_.ty, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "ty"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "ty"))
-            cmds.checkBox('tz', l='Tz', v=False,
+            cmds.checkBox('tz', l=LANGUAGE_MAP._Generic_.tz, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "tz"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "tz"))
-            cmds.checkBox('translates', l='Translates', v=False,
+            cmds.checkBox('translates', l=LANGUAGE_MAP._Generic_.translates, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', ["tx", "ty", "tz"]),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', ["tx", "ty", "tz"]))
             
-            cmds.checkBox('rx', l='Rx', v=False,
+            cmds.checkBox('rx', l=LANGUAGE_MAP._Generic_.rx, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "rx"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "rx"))
-            cmds.checkBox('ry', l='Ry', v=False,
+            cmds.checkBox('ry', l=LANGUAGE_MAP._Generic_.ry, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "ry"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "ry"))
-            cmds.checkBox('rz', l='Rz', v=False,
+            cmds.checkBox('rz', l=LANGUAGE_MAP._Generic_.rz, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "rz"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "rz"))
-            cmds.checkBox('rotates', l='Rotates', v=False,
+            cmds.checkBox('rotates', l=LANGUAGE_MAP._Generic_.rotates, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', ["rx", "ry", "rz"]),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', ["rx", "ry", "rz"]))
            
-            cmds.checkBox('sx', l='Sx', v=False,
+            cmds.checkBox('sx', l=LANGUAGE_MAP._Generic_.sx, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "sx"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "sx"))
-            cmds.checkBox('sy', l='Sy', v=False,
+            cmds.checkBox('sy', l=LANGUAGE_MAP._Generic_.sy, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "sy"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "sy"))
-            cmds.checkBox('sz', l='Sz', v=False,
+            cmds.checkBox('sz', l=LANGUAGE_MAP._Generic_.sz, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "sz"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "sz"))
-            cmds.checkBox('scales', l='Scales', v=False,
+            cmds.checkBox('scales', l=LANGUAGE_MAP._Generic_.scales, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', ["sx", "sy", "sz"]),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', ["sx", "sy", "sz"]))
             
-            cmds.checkBox('v', l='Vis', v=False,
+            cmds.checkBox('v', l=LANGUAGE_MAP._Generic_.vis, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', "v"),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', "v"))
             
             cmds.setParent('..')
-            cmds.rowColumnLayout(ann='attrs', numberOfColumns=2,
+            cmds.rowColumnLayout(ann=LANGUAGE_MAP._Generic_.attrs, numberOfColumns=2,
                                  columnWidth=[(1, 150)])
-            cmds.checkBox('userDefined', l='All User Defined Attrs', v=False,
-                          ann='These are non-standard attributes added to the nodes. These are considered per node',
+            cmds.checkBox('userDefined', l=LANGUAGE_MAP._LockChannelsUI_.user_defined, v=False,
+                          ann=LANGUAGE_MAP._LockChannelsUI_.user_defined_ann,
                           onc=lambda x: self.__setattr__('userDefined', True),
                           ofc=lambda x: self.__setattr__('userDefined', False))
-            cmds.checkBox('ALL', l='ALL Attrs', v=False,
+            cmds.checkBox('ALL', l=LANGUAGE_MAP._LockChannelsUI_.all_attrs, v=False,
                           onc=lambda x: self.__uicheckboxCallbacksAttr('on', ["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz", "v", \
                                                                             "userDefined", "translates", "rotates", "scales"]),
                           ofc=lambda x: self.__uicheckboxCallbacksAttr('off', ["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz", "v", \
                                                                              "userDefined", "translates", "rotates", "scales"]))
             cmds.setParent('..')
             cmds.separator(h=20, style='in')
-            cmds.checkBox('givenAttrs', l='Specific Attrs',
+            cmds.checkBox('givenAttrs', l=LANGUAGE_MAP._LockChannelsUI_.specific_attrs,
                           onc=lambda x: cmds.textField('uitf_givenAttrs', e=True, en=True),
                           ofc=lambda x: cmds.textField('uitf_givenAttrs', e=True, en=False))
             cmds.textField('uitf_givenAttrs', text='', en=False,
-                           ann='list of specific attributes to lock, comma separated: note : RMB Menu')
+                           ann=LANGUAGE_MAP._LockChannelsUI_.specific_attrs_ann)
             cmds.popupMenu()
-            cmds.menuItem(label='Clear', command=partial(self.__uiTextFieldPopup, 'clear'))
-            cmds.menuItem(label='Add ChnBox Selection', command=partial(self.__uiTextFieldPopup, 'add'))
+            cmds.menuItem(label=LANGUAGE_MAP._Generic_.clear, command=partial(self.__uiTextFieldPopup, 'clear'))
+            cmds.menuItem(label=LANGUAGE_MAP._LockChannelsUI_.add_chnbox_selection, command=partial(self.__uiTextFieldPopup, 'add'))
       
             cmds.separator(h=20, style='in')
-            cmds.checkBox('Hierarchy', l='Hierarchy', al='left', v=False, ann='Full Hierarchy',
+            cmds.checkBox('Hierarchy', l=LANGUAGE_MAP._Generic_.hierarchy, al='left', v=False, ann=LANGUAGE_MAP._Generic_.hierarchy_ann,
                           onc=lambda x: self.__setattr__('hierarchy', True),
                           ofc=lambda x: self.__setattr__('hierarchy', False))
-            cmds.rowColumnLayout(ann='attrs', numberOfColumns=2, columnWidth=[(1, 125), (2, 125)])
-            cmds.button(label='Lock', bgc=r9Setup.red9ButtonBGC(1),
+            cmds.rowColumnLayout(ann=LANGUAGE_MAP._Generic_.attrs, numberOfColumns=2, columnWidth=[(1, 125), (2, 125)])
+            cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.lock, bgc=r9Setup.red9ButtonBGC(1),
                          command=lambda *args: (self.__uiCall('lock')))
-            cmds.button(label='unLock', bgc=r9Setup.red9ButtonBGC(2),
+            cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.unlock, bgc=r9Setup.red9ButtonBGC(2),
                          command=lambda *args: (self.__uiCall('unlock')))
-            cmds.button(label='Hide', bgc=r9Setup.red9ButtonBGC(1),
+            cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.hide, bgc=r9Setup.red9ButtonBGC(1),
                          command=lambda *args: (self.__uiCall('hide')))
-            cmds.button(label='unHide', bgc=r9Setup.red9ButtonBGC(2),
+            cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.unhide, bgc=r9Setup.red9ButtonBGC(2),
                          command=lambda *args: (self.__uiCall('unhide')))
             cmds.separator(h=20, style='in')
             cmds.separator(h=20, style='in')
-            self.__uibtStore = cmds.button(label='Store attrMap', bgc=r9Setup.red9ButtonBGC(1),
-                         ann='This saves the current "lock,keyable,hidden" status of all attributes in the channelBox to an attrMap file',
+            self.__uibtStore = cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.store_attrmap, bgc=r9Setup.red9ButtonBGC(1),
+                         ann=LANGUAGE_MAP._LockChannelsUI_.store_attrmap_ann,
                          command=lambda *args: (self.__uichannelMapFile('save')))
-            self.__uibtLoad = cmds.button(label='Load from attrMap', bgc=r9Setup.red9ButtonBGC(1),
-                         ann='This restores the "lock,keyable,hidden" status of all attributes from the attrMap file',
+            self.__uibtLoad = cmds.button(label=LANGUAGE_MAP._LockChannelsUI_.load_attrmap, bgc=r9Setup.red9ButtonBGC(1),
+                         ann=LANGUAGE_MAP._LockChannelsUI_.load_attrmap_ann,
                          command=lambda *args: (self.__uichannelMapFile('load')))
             cmds.setParent('..')
             cmds.separator(h=10, style='none')
             
             
-            cmds.checkBox('serializeToNode', l='Serialized attrMap to node',
-                          ann='rather than saving the data to a file, serialize it to a given node so its stored internally in your systems',
+            cmds.checkBox('serializeToNode', l=LANGUAGE_MAP._LockChannelsUI_.serialize_attrmap_to_node,
+                          ann=LANGUAGE_MAP._LockChannelsUI_.serialize_attrmap_to_node_ann,
                           cc=lambda x: self.__uiAttrMapModeSwitch())
 
             cmds.textFieldButtonGrp('uitfbg_serializeNode',
-                                    bl='set',
+                                    bl=LANGUAGE_MAP._Generic_.set,
                                     text='',
                                     en=False,
-                                    ann='Node for serializing the attrMap directly onto',
+                                    ann=LANGUAGE_MAP._LockChannelsUI_.set_ann,
                                     bc=lambda *args: cmds.textFieldButtonGrp('uitfbg_serializeNode', e=True, text=cmds.ls(sl=True)[0]),
                                     cw=[(1, 220), (2, 60)])
             cmds.separator(h=15, style='none')
@@ -1862,6 +1928,8 @@ class LockChannels(object):
         :param mode: 'lock', 'unlock', 'hide', 'unhide', 'fullkey', 'lockall'
         :param hierarchy: process all child nodes, default is now False
         :param usedDefined: process all UserDefined attributes on all nodes
+        
+        >>> r9Core.LockChannels.processState(nodes, attrs=["sx", "sy", "sz", "v"], mode='lockall')
         '''
         userDefAttrs=set()
         if not nodes:
@@ -1889,6 +1957,10 @@ class LockChannels(object):
             attrKws['keyable']=False
         elif mode=='unhide':
             attrKws['keyable']=True
+        elif mode=='nonkeyable':
+            attrKws['cb']=True
+        elif mode=='keyable':
+            attrKws['cb']=False
         elif mode=='fullkey':
             attrKws['keyable']=True
             attrKws['lock']=False
@@ -1907,7 +1979,7 @@ class LockChannels(object):
                     if cmds.attributeQuery(attr, node=node, exists=True):
                         attrString='%s.%s' % (node, attr)
                         if cmds.getAttr(attrString, type=True) in ['double3','float3']:
-                            #why?? Maya fails to set the 'keyable' flag staus for compound attrs!
+                            #why?? Maya fails to set the 'keyable' flag status for compound attrs!
                             childAttrs=cmds.listAttr(attrString, multi=True)
                             childAttrs.remove(attr)
                             log.debug('compoundAttr handler for node: %s.%s' % (node,attr))
@@ -1945,26 +2017,63 @@ def timeOffset_addPadding(pad=None, padfrom=None, scene=False):
     else:
         TimeOffset.fullScene(pad, timerange=(padfrom, 1000000))
     # TimeOffset.animCurves(pad, nodes=nodes, time=(padfrom, 1000000))
-   
-def timeOffset_collapse(scene=False):
+    
+def timeOffset_collapse(scene=False, timerange=None):
     '''
-    simple wrap of the timeoffset that given a selected range in the timeline will
-    collapse the keys within that range and shift forward keys back to close the gap
-    :param scene: whether to process the entire scene or selected nodes
+    Light wrap over the TimeOffset call to manage collapsing time
     '''
+    if not timerange:
+        timerange = r9Anim.timeLineRangeGet(always=True)
     nodes = None
-    timeRange = r9Anim.timeLineRangeGet(always=False)
-    if not timeRange:
+    if not timerange:
         raise StandardError('No timeRange selected to Compress')
-    offset = -(timeRange[1] - timeRange[0])
+    offset = -(timerange[1] - timerange[0])
     if not scene:
         nodes = cmds.ls(sl=True, l=True)
-        TimeOffset.fromSelected(offset, nodes=nodes, timerange=(timeRange[1], 10000000))
+        TimeOffset.fromSelected(offset, nodes=nodes, timerange=(timerange[1], 10000000))
     else:
-        TimeOffset.fullScene(offset, timerange=(timeRange[1], 10000000))
-    # TimeOffset.animCurves(-(timeRange[1]-timeRange[0]), nodes=nodes, time=(timeRange[1], 10000000))
+        TimeOffset.fullScene(offset, timerange=(timerange[1], 10000000))
+    cmds.currentTime(timerange[0], e=True)
     
-    cmds.currentTime(timeRange[0], e=True)
+def timeOffset_collapseUI():
+    '''
+    collapse time confirmation UI
+    '''
+    def __uicb_run(scene,*args):
+        timeOffset_collapse(scene=scene,
+                            timerange=(float(cmds.textField('start',q=True,tx=True)),
+                                       float(cmds.textField('end',q=True,tx=True))))
+        
+    timeRange = r9Anim.timeLineRangeGet(always=True)
+    
+    win='CollapseTime_UI'
+    if cmds.window(win, exists=True):
+        cmds.deleteUI(win, window=True)
+    cmds.window(win, title=win)
+    cmds.columnLayout(adjustableColumn=True)
+    cmds.text(label=LANGUAGE_MAP._MainMenus_.collapse_time)
+    cmds.separator(h=10, style='in')
+    cmds.rowColumnLayout(nc=4, cw=((1,60),(2,80),(3,60),(4,80)))
+    cmds.text(label='Start Frm: ')
+    cmds.textField('start', tx=timeRange[0], w=40)
+    cmds.text(label='End Frm: ')
+    cmds.textField('end', tx=timeRange[1], w=40)
+    cmds.setParent('..')
+    cmds.separator(h=10, style='none')
+    cmds.rowColumnLayout(nc=2, cw=((1,150),(2,150)))
+    cmds.button(label=LANGUAGE_MAP._MainMenus_.collapse_full,
+                ann=LANGUAGE_MAP._MainMenus_.collapse_full_ann,
+                command=partial(__uicb_run,True),bgc=r9Setup.red9ButtonBGC('green'))
+    cmds.button(label=LANGUAGE_MAP._MainMenus_.collapse_selected,
+                ann=LANGUAGE_MAP._MainMenus_.collapse_selected_ann,
+                command=partial(__uicb_run,False),bgc=r9Setup.red9ButtonBGC('green'))
+    cmds.setParent('..')
+    cmds.separator(h=15, style='none')
+    cmds.iconTextButton(style='iconOnly', bgc=(0.7, 0, 0), image1='Rocket9_buttonStrap2.bmp',
+                                 c=lambda *args: (r9Setup.red9ContactInfo()), h=22, w=200)
+    
+    cmds.showWindow(win)
+    
    
 class TimeOffset(object):
     '''
@@ -1982,22 +2091,28 @@ class TimeOffset(object):
 
     '''
     @classmethod
-    def fullScene(cls, offset, timelines=False, timerange=None):
+    def fullScene(cls, offset, timelines=False, timerange=None, ripple=True):
         '''
         Process the entire scene and time offset all suitable nodes
+        
+        :param offset: number of frames to offset
+        :param timelines: offset the playback timelines
+        :param timerange: only offset times within a given timerange
+        :param ripple: manage the upper range of data and ripple them with the offset
         '''
         log.debug('TimeOffset Scene : offset=%s, timelines=%s' % \
                   (offset, str(timelines)))
-        cls.animCurves(offset, timerange=timerange)
-        cls.sound(offset, mode='Scene', timerange=timerange)
-        cls.animClips(offset, mode='Scene', timerange=timerange)
+        cls.animCurves(offset, timerange=timerange, ripple=ripple)
+        cls.sound(offset, mode='Scene', timerange=timerange, ripple=ripple)
+        cls.animClips(offset, mode='Scene', timerange=timerange, ripple=ripple)
         if timelines:
             cls.timelines(offset)
+        cls.metaNodes(offset, timerange=timerange, ripple=ripple)
         print('Scene Offset Successfully')
         
     @classmethod
     def fromSelected(cls, offset, nodes=None, filterSettings=None, flocking=False,
-                     randomize=False, timerange=None):
+                     randomize=False, timerange=None, ripple=True):
         '''
         Process the current selection list and offset as appropriate.
         
@@ -2006,6 +2121,7 @@ class TimeOffset(object):
         :param flocking: wether to sucessively increment nodes during offset
         :param randomize: whether to add a ramdon factor to each succesive nodes offset
         :param timerange: only offset times within a given timerange
+        :param ripple: manage the upper range of data and ripple them with the offset
         :param filterSettings: this is a FilterSettings_Node object used to pass all 
             the filter types into the FilterNode code. Internally the following is true:
 
@@ -2015,8 +2131,8 @@ class TimeOffset(object):
             | settings.hierarchy: bool - process all children from the roots
             | settings.incRoots: bool - include the original root nodes in the filter
         '''
-        log.debug('TimeOffset from Selected : offset=%s, flocking=%i, randomize=%i, timerange=%s' % \
-                  (offset, flocking, randomize, str(timerange)))
+        log.debug('TimeOffset from Selected : offset=%s, flocking=%i, randomize=%i, timerange=%s, ripple:%s' % \
+                  (offset, flocking, randomize, str(timerange), ripple))
         if not nodes:
             nodes=cmds.ls(sl=True, l=True)
 
@@ -2038,23 +2154,30 @@ class TimeOffset(object):
                         rand = random.uniform(0, offset)
                         increment = cachedOffset + rand
                         cachedOffset += rand
-                    cls.animCurves(increment, node)
+                    cls.animCurves(increment, node,
+                                   timerange=timerange,
+                                   ripple=ripple)
                     log.debug('animData randon/flock modified offset : %f on node: %s' % (increment, nodeNameStrip(node)))
             else:
-                cls.animCurves(offset, nodes=nodes, timerange=timerange)
+                print nodes
+                cls.animCurves(offset, nodes=nodes,
+                               timerange=timerange,
+                               ripple=ripple)
                 cls.sound(offset, mode='Selected',
-                          audioNodes=FilterNode().lsSearchNodeTypes('audio', nodes),
-                          timerange=timerange)
+                                audioNodes=FilterNode().lsSearchNodeTypes('audio', nodes),
+                                timerange=timerange,
+                                ripple=ripple)
                 cls.animClips(offset, mode='Selected',
-                              clips=FilterNode().lsSearchNodeTypes('animClip', nodes),
-                              timerange=timerange)
+                                clips=FilterNode().lsSearchNodeTypes('animClip', nodes),
+                                timerange=timerange,
+                                ripple=ripple)
             log.info('Selected Nodes Offset Successfully')
         else:
             raise StandardError('Nothing selected or returned from the Hierarchy filter to offset')
 
     @staticmethod
     @r9General.Timer
-    def animCurves(offset, nodes=None, timerange=None):
+    def animCurves(offset, nodes=None, timerange=None, ripple=True):
         '''
         Shift Animation curves. If nodes are fed in to process then we do
         a number of aggressive searches to find all linked animation data.
@@ -2064,6 +2187,7 @@ class TimeOffset(object):
         :param timerange: if timerange given [start,end] then we cut the keys in that 
             range before shifting associated keys. Now we could just use the 
             keyframe(option='insert') BUT this has a MAJOR crash bug!
+        :param ripple: manage the upper range of keys and ripple them with the offset
         '''
         safeCurves=FilterNode.lsAnimCurves(nodes, safe=True)
         
@@ -2071,22 +2195,29 @@ class TimeOffset(object):
             log.debug('AnimCurve Offset = %s ============================' % offset)
             #log.debug(''.join([('offset: %s\n' % curve) for curve in safeCurves]))
             moved=0
+            
             if timerange:
+                rippleRange=(timerange[0], 1000000000)
                 if offset>0:
                     #if moving positive in time, cutchunk is from the upper timerange + offset
                     cutTimeBlock=(timerange[1] + 0.1, timerange[1] + offset)
                 else:
                     #else it's from the lower timerange - offset
                     cutTimeBlock=(timerange[0] + 0.1, timerange[0] - abs(offset + 1))
+                    
             for curve in safeCurves:
                 try:
                     if timerange:
                         try:
-                            log.debug('cutting moveRange: %f > %f  : %s' % (cutTimeBlock[0], cutTimeBlock[1], curve))
-                            cmds.cutKey(curve, time=cutTimeBlock)
+                            if not ripple or offset<0:
+                                log.debug('cutting moveRange: %f > %f  : %s' % (cutTimeBlock[0], cutTimeBlock[1], curve))
+                                cmds.cutKey(curve, time=cutTimeBlock)
                         except:
                             log.debug('unable to cut keys')
-                        cmds.keyframe(curve, edit=True, r=True, timeChange=offset, time=timerange)
+                        if ripple:
+                            cmds.keyframe(curve, edit=True, r=True, timeChange=offset, time=rippleRange)
+                        else:
+                            cmds.keyframe(curve, edit=True, r=True, timeChange=offset, time=timerange)
                     else:
                         cmds.keyframe(curve, edit=True, r=True, timeChange=offset)
                     log.debug('offsetting: %s' % curve)
@@ -2107,7 +2238,7 @@ class TimeOffset(object):
                              max=cmds.playbackOptions(q=True, max=True) + offset)
         
     @staticmethod
-    def sound(offset, mode='Scene', audioNodes=None, timerange=None):
+    def sound(offset, mode='Scene', audioNodes=None, timerange=None, ripple=True):
         '''
         Offset Audio nodes.
         
@@ -2115,6 +2246,8 @@ class TimeOffset(object):
         :param mode: either process entire scene or selected
         :param audioNodes: optional, given nodes to process
         :param timerange: optional timerange to process (outer bounds only)
+        :param ripple: when shifting nodes ripple the offset to sounds after the range, 
+            if ripple=False we only shift audio that starts in tghe bounds of the timerange
         '''
         if mode=='Scene':
             audioNodes=cmds.ls(type='audio')
@@ -2124,18 +2257,22 @@ class TimeOffset(object):
             for sound in audioNodes:
                 try:
                     audioNode=r9Audio.AudioNode(sound)
-                    if timerange and not audioNode.startFrame>timerange[0]:
-                        log.info('Skipping Sound : %s > sound starts before the timerange begins' % sound)
-                        continue
+                    if timerange:
+                        if not audioNode.startFrame>timerange[0]:
+                            log.info('Skipping Sound : %s > sound starts before the timerange begins' % sound)
+                            continue
+                        if audioNode.startFrame>timerange[1] and not ripple:
+                            log.info('Skipping Sound : %s > sound starts after the timerange ends' % sound)
+                            continue
                     audioNode.offsetTime(offset)
                     nodesOffset+=1
                     log.debug('offset : %s' % sound)
                 except:
-                    pass
+                    log.debug('Failed to offset audio node %s' % sound)
             log.info('%i : SoundNodes were offset' % nodesOffset)
                 
     @staticmethod
-    def animClips(offset, mode='Scene', clips=None, timerange=None):
+    def animClips(offset, mode='Scene', clips=None, timerange=None, ripple=True):
         '''
         Offset Trax Clips
         
@@ -2143,6 +2280,8 @@ class TimeOffset(object):
         :param mode: either process entire scene or selected
         :param clips: optional, given clips to offset
         :param timerange: optional timerange to process (outer bounds only)
+        :param ripple: when shifting nodes ripple the offset to clips after the range, 
+            if ripple=False we only shift clips that starts in tghe bounds of the timerange
         '''
         if mode=='Scene':
             clips=cmds.ls(type='animClip')
@@ -2151,18 +2290,46 @@ class TimeOffset(object):
             for clip in clips:
                 try:
                     startFrame = cmds.getAttr('%s.startFrame' % clip)
-                    if timerange and not startFrame>timerange[0]:
-                        log.info('Skipping Clip : %s > clip starts before the timerange begins' % clip)
-                        continue
+                    if timerange:
+                        if not startFrame>timerange[0]:
+                            log.info('Skipping Clip : %s > clip starts before the timerange begins' % clip)
+                            continue
+                        if startFrame>timerange[1] and not ripple:
+                            log.info('Skipping Clip : %s > clip starts after the timerange begins' % clip)
+                            continue
                     cmds.setAttr('%s.startFrame' % clip, startFrame + offset)
                     log.debug('offset : %s' % clip)
                 except:
                     pass
             log.info('%i : AnimClips were offset' % len(clips))
- 
+          
+    @staticmethod
+    @r9General.Timer
+    def metaNodes(offset, timerange=None, ripple=True):
+        '''
+        Offset special handling for MetaNodes. Inspect the metaNode and see if 
+        the 'timeOffset' method has been implemented and if so, call it.
+        
+        .. note: 
+            ONLY runs in Scene mode and timerange and ripple are down to the metaNode
+            to handle in it's internal implementation
+        
+        :param offset: amount to offset the sounds nodes by
+        :param timerange: optional timerange to process (outer bounds only)
+        :param ripple: when shifting nodes ripple the offset to clips after the range, 
+            if ripple=False we only shift clips that starts in tghe bounds of the timerange
+        '''
+
+        mNodes=r9Meta.getMetaNodes()
+        if mNodes:
+            log.debug('MetaData Offset ============================')
+            for mNode in mNodes:
+                if 'timeOffset' in dir(mNode) and callable(getattr(mNode, 'timeOffset')):
+                    mNode.timeOffset(offset, timerange=timerange, ripple=ripple)
+            log.info('%i : MetaData were offset' % len(mNodes))
  
 
-#Math functions ----------------------------------------------------------------------
+# Math functions ----------------------------------------------------------------------
 
 def floatIsEqual(a, b, tolerance=0.01, allowGimbal=True):
     '''
@@ -2195,6 +2362,7 @@ def floatIsEqual(a, b, tolerance=0.01, allowGimbal=True):
 
 def valueToMappedRange(value, currentMin, currentMax, givenMin, givenMax):
     '''
+    Acts like the setRange node but code side
     we have a min max range, lets say 0.5 - 15 and we want to map the
     range to a new range say 0-1 and return where the value given is
     in that new range

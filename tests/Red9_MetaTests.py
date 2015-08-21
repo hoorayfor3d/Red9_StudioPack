@@ -32,28 +32,101 @@ r9Setup.mayaUpAxis('y')
 
 class Test_MetaRegistryCalls():
     
+    def teardown(self):
+        cmds.file(new=True,f=True)
+        r9Meta.registerMClassNodeMapping()  # reset the nodeTypes registry
+        
     def test_registerMClassNodeMapping(self):
         '''
         test the registry functions for nodeTypes
         '''
         cmds.file(new=True,f=True)
         r9Meta.MetaClass(name='standardNetworkMetaNode')
-        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network']   
+        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network']
          
         #register transforms to the NodeTypes
         r9Meta.registerMClassNodeMapping(nodeTypes='transform')
         print r9Meta.getMClassNodeTypes()
         assert r9Meta.getMClassNodeTypes()==sorted(['network', 'objectSet', 'transform'])
         new=r9Meta.MetaClass(name='newTransformMetaNode', nodeType='transform')
-        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network','transform']  
+        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network','transform']
         
         #reset the NodeTypes
         r9Meta.resetMClassNodeTypes()
         print r9Meta.getMClassNodeTypes()
-        assert r9Meta.getMClassNodeTypes()==['network','objectSet']#,'HIKCharacterNode']
-        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network'] 
-        
+        assert r9Meta.getMClassNodeTypes()==['network','objectSet']  # ,'HIKCharacterNode']
+        assert [cmds.nodeType(n.mNode) for n in r9Meta.getMetaNodes()]==['network']
     
+    def test_getMClassInstances(self):
+        for mNode in r9Meta.getMClassInstances(r9Meta.MetaHUDNode):
+            assert issubclass(mNode, r9Meta.MetaHUDNode)
+        for mNode in r9Meta.getMClassInstances(r9Meta.MetaRig):
+            assert issubclass(mNode, r9Meta.MetaRig)
+            
+    def test_getMClassDataFromNode(self):
+        a=r9Meta.MetaRig(name='rig')
+        b=r9Meta.MetaRigSubSystem(name='subSub')
+        assert r9Meta.getMClassDataFromNode(a)=='MetaRig'
+        assert r9Meta.getMClassDataFromNode(a.mNode)=='MetaRig'
+        assert r9Meta.getMClassDataFromNode(b)=='MetaRigSubSystem'
+        assert r9Meta.getMClassDataFromNode(b.mNode)=='MetaRigSubSystem'
+    
+
+class Test_MetaCache():
+    
+    def teardown(self):
+        cmds.file(new=True,f=True)
+    
+    def test_MetaCache(self):
+        a=r9Meta.MetaRig(name='rig')
+        dagpath=str(a.mNode)
+        assert r9Meta.getMetaFromCache(a.mNode)==a
+        assert r9Meta.getMetaFromCache(dagpath)==a
+        assert r9Meta.MetaClass(a.mNode)==a
+        r9Meta.resetCache()
+        assert not r9Meta.getMetaFromCache(a.mNode)
+        r9Meta.MetaClass(a.mNode)
+        assert r9Meta.getMetaFromCache(a.mNode)==a
+        dagpath=str(a.mNode)
+        a.delete()
+        assert not r9Meta.RED9_META_NODECACHE
+        
+    def test_uuid(self):
+        a=r9Meta.MetaRig(name='rig')
+        UUID = a.UUID
+        assert UUID in r9Meta.RED9_META_NODECACHE
+        
+        #test the duplicate handler
+        dup=cmds.duplicate(a.mNode)
+        assert not dup == a.mNode
+        nodes=r9Meta.getMetaNodes()
+        assert len(nodes)==2
+        assert len(r9Meta.RED9_META_NODECACHE.keys()) == 2
+        assert r9Meta.RED9_META_NODECACHE[UUID]==a
+        assert r9Meta.MetaClass(a.mNode).UUID == UUID
+    
+    def test_wrappedMayaNodes(self):
+        '''
+        test how the cache handles non mClass nodes
+        '''
+        cmds.polyCube(name='cube1')
+        n1 = r9Meta.MetaClass('|cube1')
+        r9Meta.registerMClassNodeCache(n1)
+        assert r9Meta.RED9_META_NODECACHE['|cube1']==n1
+        n1.rename('renamedCube1')
+        assert n1.mNode=='|renamedCube1'
+        
+        #because in this case we have no UUID's we only store the
+        #cache against the node name. Theres now a test against
+        #the MOBject to ensure that things are still correct in the pull
+        cmds.polyCube(name='cube1')
+        n2 = r9Meta.MetaClass('|cube1')
+        assert n2.mNode=='|cube1'
+        assert not n2.mNode=='renamedCube1'
+        r9Meta.registerMClassNodeCache(n2)
+        assert r9Meta.RED9_META_NODECACHE['|cube1']==n2
+       
+
 class Test_MetaClass():
     
     def setup(self):
@@ -69,6 +142,15 @@ class Test_MetaClass():
         assert self.MClass.mNode=='MetaClass_Test'
         assert cmds.nodeType(self.MClass.mNode)=='network'
     
+    def test_unregisteredNodeType(self):
+        #new handler will bail if you try and create with an unRegistered nodeType
+        try:
+            r9Meta.MetaClass(name='new', nodeType='transform')
+            print 'Failed - generated new node with unregistered nodeType!'
+            assert False
+        except:
+            assert True
+            
     def test_functionCalls(self):
         
         #select
@@ -83,7 +165,7 @@ class Test_MetaClass():
         assert cmds.ls(sl=True)[0]=='FooBar'
         
         #convert
-        new=self.MClass.convertMClassType('MetaRig')
+        new=r9Meta.convertMClassType(self.MClass,'MetaRig')
         assert isinstance(new,r9Meta.MetaRig)
         assert self.MClass.mClass=='MetaRig'
         
@@ -95,7 +177,7 @@ class Test_MetaClass():
         assert not self.MClass.isReferenced()
     
     def test_isValid(self):
-        assert self.MClass.isValid() #strange one, isValid fails if the mNode has no connections.... is this a good decision?
+        assert self.MClass.isValid()  # strange one, isValid fails if the mNode has no connections.... is this a good decision?
         cube1=cmds.ls(cmds.polyCube()[0],l=True)[0]
         newMeta=r9Meta.MetaClass(cube1)
         assert newMeta.isValid()
@@ -112,11 +194,11 @@ class Test_MetaClass():
         '''
         add a new MetaNode as a child of self
         '''
-        newMFacial=self.MClass.addChildMetaNode('MetaFacialRig',attr='Facial',nodeName='FacialNode') 
+        newMFacial=self.MClass.addChildMetaNode('MetaFacialRig',attr='Facial',nodeName='FacialNode')
         assert isinstance(newMFacial,r9Meta.MetaFacialRig)
         assert newMFacial.mNode=='FacialNode'
         assert cmds.listConnections('%s.Facial' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.Facial',
-                                                                                     'FacialNode.MetaClass_Test'] 
+                                                                                     'FacialNode.MetaClass_Test']
         assert isinstance(self.MClass.Facial,r9Meta.MetaFacialRig)
         assert self.MClass.Facial.mNode=='FacialNode'
         
@@ -124,15 +206,15 @@ class Test_MetaClass():
         '''
         add a new MetaNode as a child of self, passing in class rather than a string
         '''
-        newMFacial=self.MClass.addChildMetaNode(r9Meta.MetaFacialRig,attr='Facial',nodeName='FacialNode') 
+        newMFacial=self.MClass.addChildMetaNode(r9Meta.MetaFacialRig,attr='Facial',nodeName='FacialNode')
         assert isinstance(newMFacial,r9Meta.MetaFacialRig)
         assert newMFacial.mNode=='FacialNode'
         assert cmds.listConnections('%s.Facial' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.Facial',
-                                                                                     'FacialNode.MetaClass_Test'] 
+                                                                                     'FacialNode.MetaClass_Test']
         assert isinstance(self.MClass.Facial,r9Meta.MetaFacialRig)
         assert self.MClass.Facial.mNode=='FacialNode'
              
-    def test_connectionsTo_MetaNodes_child(self):   
+    def test_connectionsTo_MetaNodes_child(self):
         '''
         Test how the code handles connections to other MetaNodes
         '''
@@ -144,32 +226,32 @@ class Test_MetaClass():
         assert self.MClass.hasAttr('Facial')
         assert not facialNode.hasAttr('Facial')
         assert facialNode.hasAttr('MetaClass_Test')
-        assert cmds.listConnections('%s.Facial' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.Facial', 
-                                                                                     'FacialNode.MetaClass_Test'] 
+        assert cmds.listConnections('%s.Facial' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.Facial',
+                                                                                     'FacialNode.MetaClass_Test']
         #test disconnect call
         self.MClass.disconnectChild(self.MClass.Facial, deleteSourcePlug=True, deleteDestPlug=True)
         assert not self.MClass.hasAttr('Facial')
-        assert not facialNode.hasAttr('MetaClass_Test')       
+        assert not facialNode.hasAttr('MetaClass_Test')
         
         #test the additional attr flag
-        self.MClass.connectChild(facialNode,'parentAttr','childAttr')  
-        assert cmds.listConnections('%s.parentAttr' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.parentAttr', 
+        self.MClass.connectChild(facialNode,'parentAttr','childAttr')
+        assert cmds.listConnections('%s.parentAttr' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.parentAttr',
                                                                                      'FacialNode.childAttr']
         self.MClass.disconnectChild(self.MClass.parentAttr, deleteSourcePlug=True, deleteDestPlug=True)
         assert not self.MClass.hasAttr('parentAttr')
-        assert not facialNode.hasAttr('childAttr')  
+        assert not facialNode.hasAttr('childAttr')
         
-    def test_connectionsTo_MetaNodes_children(self):   
+    def test_connectionsTo_MetaNodes_children(self):
         '''
-        COMPLEX! Test how the code handles connections to other MetaNodes via 
-        connectChildren. Note that currently if the connections are between 
+        COMPLEX! Test how the code handles connections to other MetaNodes via
+        connectChildren. Note that currently if the connections are between
         MetaNodes then the messageAttr is INDEX managed
-        '''       
-        master1= r9Meta.MetaClass(name = 'master1')
-        master2= r9Meta.MetaClass(name = 'master2')
-        child1 = r9Meta.MetaClass(name = 'child1')
-        child2 = r9Meta.MetaClass(name = 'child2')
-        cube=cmds.ls(cmds.polyCube()[0],l=True)[0]
+        '''
+        master1 = r9Meta.MetaClass(name='master1')
+        master2 = r9Meta.MetaClass(name='master2')
+        child1 = r9Meta.MetaClass(name='child1')
+        child2 = r9Meta.MetaClass(name='child2')
+        cube = cmds.ls(cmds.polyCube()[0], l=True)[0]
         
         #note mClass instance being passed in
         master1.connectChildren([child1,child2,cube],'modules','puppet')
@@ -180,31 +262,31 @@ class Test_MetaClass():
         assert child2.puppet==[master1]
         assert cmds.attributeQuery('puppet', node=cube, m=True)
         assert not cmds.attributeQuery('puppet', node=cube, im=True)
-        assert cmds.listConnections('%s.puppet' % cube)==['master1'] 
+        assert cmds.listConnections('%s.puppet' % cube)==['master1']
         
         #mClass mNode being passed in
         master2.connectChildren([child1.mNode,child2.mNode,cube],'time','master',force=True)
         assert master2.time==['|pCube1', child1, child2]
         assert child1.master==[master2]
         assert child2.master==[master2]
-        assert cmds.listConnections('%s.master' % cube)==['master2'] 
+        assert cmds.listConnections('%s.master' % cube)==['master2']
         #check previous
         assert master1.modules==['|pCube1',child1,child2]
         assert child1.puppet==[master1]
         assert child2.puppet==[master1]
-        assert cmds.listConnections('%s.puppet' % cube)==['master1'] 
+        assert cmds.listConnections('%s.puppet' % cube)==['master1']
         
         master1.connectChildren([child1,child2],'time','master',cleanCurrent=True)
         assert master1.time==[child1, child2]
-        assert sorted(child1.master,key=lambda x:x.mNode)== [master1, master2] 
-        assert sorted(child2.master,key=lambda x:x.mNode)== [master1, master2] 
+        assert sorted(child1.master,key=lambda x:x.mNode)== [master1, master2]
+        assert sorted(child2.master,key=lambda x:x.mNode)== [master1, master2]
         #check previous
         assert master2.time==['|pCube1', child1, child2]
-        assert cmds.listConnections('%s.master' % cube)==['master2'] 
+        assert cmds.listConnections('%s.master' % cube)==['master2']
         assert master1.modules==['|pCube1', child1, child2]
         assert child1.puppet==[master1]
         assert child2.puppet==[master1]
-        assert cmds.listConnections('%s.puppet' % cube)==['master1'] 
+        assert cmds.listConnections('%s.puppet' % cube)==['master1']
         
         try:
             master1.connectChildren([child1],'time','master')
@@ -221,9 +303,9 @@ class Test_MetaClass():
         
         master1.disconnectChild(child1)
         assert master1.modules==['|pCube1',child2]
-        assert not master1.hasAttr('time') #cleaned the plug
+        assert not master1.hasAttr('time')  # cleaned the plug
         assert child1.master==[master2]
-        assert child1.hasAttr('puppet') #???? FIXME: this is wrong, it should have been cleaned as it's now empty!
+        assert child1.hasAttr('puppet')  # ???? FIXME: this is wrong, it should have been cleaned as it's now empty!
         #assert not child1.puppet
         
         #check previous
@@ -261,7 +343,7 @@ class Test_MetaClass():
         #connect something else to Singluar - cleanCurrent=True by default so unhook cube1
         self.MClass.connectChild(cube2,'Singluar')
         assert self.MClass.Singluar==[cube2]
-        assert not cmds.attributeQuery('MetaClassTest',node=cube1,exists=True) #cleaned up after ourselves?
+        assert not cmds.attributeQuery('MetaClassTest',node=cube1,exists=True)  # cleaned up after ourselves?
         self.MClass.connectChildren([cube3,cube4],'Singluar')
         assert sorted(self.MClass.Singluar)==[cube2,cube3,cube4]
         
@@ -318,7 +400,7 @@ class Test_MetaClass():
         assert sorted(self.MClass.con1)==[cube2,cube6]
         
         #unhook manager for cleanCurrent, no 'srcAttr' flag given so the attr on the node
-        #used to connect to mNode is the same default for all, mNode.mNodeID. This means 
+        #used to connect to mNode is the same default for all, mNode.mNodeID. This means
         #the node can't be connected to the same mNode more than once by default
         self.MClass.connectChild(cube1,'singleAttr1')
         assert self.MClass.singleAttr1==[cube1]
@@ -326,11 +408,11 @@ class Test_MetaClass():
         assert self.MClass.singleAttr2==[cube1]
         assert not self.MClass.singleAttr1==[cube1]
         
-        #test multiple connections to the same mNode by specifying the srcAttr used on the 
+        #test multiple connections to the same mNode by specifying the srcAttr used on the
         #node itself, stops the node getting mNode.mNodeID attr which is the default
         self.MClass.connectChild(cube1, 'singleAttr1', srcAttr='newScrAttr')
         assert self.MClass.singleAttr1==[cube1]
-        assert self.MClass.singleAttr2==[cube1] #is still connected
+        assert self.MClass.singleAttr2==[cube1]  # is still connected
         assert cmds.listConnections('%s.singleAttr1' % self.MClass.mNode,c=True,p=True)==['MetaClass_Test.singleAttr1',
                                                                                           'pCube1.newScrAttr']
         #force Flag test
@@ -414,21 +496,31 @@ class Test_MetaClass():
         self.MClass.lockState=True
         assert cmds.lockNode(self.MClass.mNode, query=True)[0]
         
+    def test_addAttrHandling(self):
+        self.MClass.addAttr('floatAttr', 1, l=True)
+        assert self.MClass.attrIsLocked('floatAttr')
+        self.MClass.addAttr('max', 1, max=10)
+        assert self.MClass.max==1
+        try:
+            self.MClass.max=30
+        except:
+            assert True
+        assert cmds.addAttr('%s.max' % self.MClass.mNode, q=True,max=True) == 10
         
         
     def test_attributeHandling(self):
         '''
-        This tests the standard attribute handing in the MetaClass.__setattr__ 
+        This tests the standard attribute handing in the MetaClass.__setattr__
         '''
         node=self.MClass
         
         #standard attribute handling
-        node.addAttr('stringTest', "this_is_a_string")  #create a string attribute
-        node.addAttr('fltTest', 1.333)        #create a float attribute
-        node.addAttr('fltTest2', 10.5, min=0,max=15)  #create a float attribute with min/max
-        node.addAttr('intTest', 3)            #create a int attribute
-        node.addAttr('boolTest', False)       #create a bool attribute
-        node.addAttr('enum', attrType='enum', enumName='A:B:D:E:F') #create an enum attribute
+        node.addAttr('stringTest', "this_is_a_string")  # create a string attribute
+        node.addAttr('fltTest', 1.333)        # create a float attribute
+        node.addAttr('fltTest2', 10.5, min=0,max=15)  # create a float attribute with min/max
+        node.addAttr('intTest', 3)            # create a int attribute
+        node.addAttr('boolTest', False)       # create a bool attribute
+        node.addAttr('enum', attrType='enum', enumName='A:B:D:E:F')  # create an enum attribute
         node.addAttr('doubleTest', attrType='double3', value=(1.12,2.55,5.0))
         node.addAttr('doubleTest2', attrType='double3', value=(1.0,2.0,10.0), min=1,max=15)
         node.addAttr('doubleArray', attrType='doubleArray', value=(1.0,2.0,10.0))
@@ -446,7 +538,7 @@ class Test_MetaClass():
         assert node.hasAttr('boolTest')
         assert node.hasAttr('enum')
         assert node.hasAttr('jsonTest')
-        assert node.hasAttr('doubleTest')   #compound3 so it adds 3 child attrs
+        assert node.hasAttr('doubleTest')   # compound3 so it adds 3 child attrs
         assert node.hasAttr('doubleTestX')
         assert node.hasAttr('doubleTestY')
         assert node.hasAttr('doubleTestZ')
@@ -482,7 +574,7 @@ class Test_MetaClass():
         assert cmds.getAttr('%s.doubleTestY' % node.mNode)==2.55
         assert cmds.getAttr('%s.doubleTestZ' % node.mNode)==5.0
         assert cmds.getAttr('%s.doubleArray' % node.mNode)==[1.0,2.0,10.0]
-        assert not cmds.getAttr('%s.doubleArray2' % node.mNode) #added with no initial value
+        assert not cmds.getAttr('%s.doubleArray2' % node.mNode)  # added with no initial value
         
         assert cmds.attributeQuery('fltTest2',node=node.mNode, max=True)==[15.0]
         assert cmds.attributeQuery('doubleTest2X',node=node.mNode, min=True)==[1.0]
@@ -491,36 +583,36 @@ class Test_MetaClass():
         
         #now check the MetaClass __getattribute__ and __setattr__ calls
         #--------------------------------------------------------------
-        assert node.intTest==3       
-        node.intTest=10     #set back to the MayaNode
+        assert node.intTest==3
+        node.intTest=10     # set back to the MayaNode
         assert node.intTest==10
         
         #float ========================
         assert node.fltTest==1.333
-        node.fltTest=3.55   #set the float attr
+        node.fltTest=3.55   # set the float attr
         assert node.fltTest==3.55
         #float with min, max kws passed
-        try: 
+        try:
             #try setting the value past it's max
             node.fltTest2=22
             assert False
         except:
             assert True
-        try: 
+        try:
             #try setting the value past it's min
             node.fltTest2=-5
             assert False
         except:
-            assert True    
+            assert True
             
         #string =======================
         assert node.stringTest=='this_is_a_string'
-        node.stringTest="change the text"   #set the string attr
+        node.stringTest="change the text"   # set the string attr
         assert node.stringTest=='change the text'
         
         #bool =========================
         assert node.boolTest==False
-        node.boolTest=True  #set bool
+        node.boolTest=True  # set bool
         assert node.boolTest==True
         
         #enum =========================
@@ -534,9 +626,9 @@ class Test_MetaClass():
         assert type(node.jsonTest)==dict
         assert node.jsonTest=={'jsonFloat':1.05,'jsonInt':3,'jsonString':'string says hello','jsonBool':True}
         assert node.jsonTest['jsonFloat']==1.05
-        assert node.jsonTest['jsonInt']==3 
+        assert node.jsonTest['jsonInt']==3
         assert node.jsonTest['jsonString']=='string says hello'
-        assert node.jsonTest['jsonBool']==True 
+        assert node.jsonTest['jsonBool']==True
         
         #double3 ======================
         assert node.doubleTest==(1.12,2.55,5.0)
@@ -545,13 +637,13 @@ class Test_MetaClass():
         assert node.doubleTestZ==5.0
         node.doubleTest=(2.0,44.2,22.0)
         assert node.doubleTest==(2.0,44.2,22.0)
-        try: 
+        try:
             #try setting the value past it's max
             node.doubleTest2=(0,1,22)
             assert False
         except:
             assert True
-        try: 
+        try:
             #try setting the value past it's max
             node.doubleTest2X=-10
             assert False
@@ -574,7 +666,21 @@ class Test_MetaClass():
         assert not cmds.attributeQuery('boolTest',node=node.mNode,exists=True)
     
 
-        
+    def test_attributeHandlingMath(self):
+        '''
+        This tests the python attr handling with math args
+        '''
+        node=self.MClass
+
+        node.addAttr('fltTest', 1.5)
+        node.fltTest+=1
+        assert node.fltTest==2.5
+        node.fltTest-=1
+        assert node.fltTest == 1.5
+        node.fltTest*=2
+        assert node.fltTest == 3.0
+
+
     def test_attributeHandling_MessageAttr(self):
         '''
         test the messageLink handling in the __setattr__ block and addAttr
@@ -590,8 +696,8 @@ class Test_MetaClass():
         cube5=cmds.ls(cmds.polyCube()[0],l=True)[0]
         cube6=cmds.ls(cmds.polyCube()[0],l=True)[0]
  
-        node.addAttr('msgMultiTest', value=[cube1,cube2], attrType='message')   #multi Message attr
-        node.addAttr('msgSingleTest', value=cube3, attrType='messageSimple')    #non-multi message attr
+        node.addAttr('msgMultiTest', value=[cube1,cube2], attrType='message')   # multi Message attr
+        node.addAttr('msgSingleTest', value=cube3, attrType='messageSimple')    # non-multi message attr
         
         assert node.hasAttr('msgMultiTest')
         assert node.hasAttr('msgSingleTest')
@@ -606,7 +712,7 @@ class Test_MetaClass():
                                                                  'pCube2.MetaClass_Test',
                                                                  'MetaClass_Test.msgMultiTest',
                                                                  'pCube1.MetaClass_Test']
-        assert cmds.listConnections('%s.msgSingleTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgSingleTest', 
+        assert cmds.listConnections('%s.msgSingleTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgSingleTest',
                                                                                      'pCube3.MetaClass_Test']
    
         assert sorted(node.msgMultiTest)==[cube1,cube2]
@@ -615,21 +721,21 @@ class Test_MetaClass():
         #test the reconnect handler via the setAttr
         node.msgMultiTest=[cube5,cube6]
         assert sorted(node.msgMultiTest)==[cube5,cube6]
-        assert not cmds.attributeQuery('MetaClass_Test',node=cube1, exists=True) #disconnect should delete the old connection attr 
+        assert not cmds.attributeQuery('MetaClass_Test',node=cube1, exists=True)  # disconnect should delete the old connection attr
         assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest',
                                                                  'pCube6.MetaClass_Test',
                                                                  'MetaClass_Test.msgMultiTest',
-                                                                 'pCube5.MetaClass_Test']                                                          
+                                                                 'pCube5.MetaClass_Test']
         node.msgMultiTest=[cube1,cube2,cube4,cube6]
         assert sorted(node.msgMultiTest)==[cube1,cube2,cube4,cube6]
         assert sorted(cmds.listConnections('%s.msgMultiTest' % node.mNode))==['pCube1','pCube2','pCube4','pCube6']
         
         node.msgSingleTest=cube4
-        assert node.msgSingleTest==[cube4] 
-        assert cmds.listConnections('%s.msgSingleTest' % node.mNode)==['pCube4'] #cmds returns a list
+        assert node.msgSingleTest==[cube4]
+        assert cmds.listConnections('%s.msgSingleTest' % node.mNode)==['pCube4']  # cmds returns a list
         node.msgSingleTest=cube3
-        assert node.msgSingleTest==[cube3] 
-        assert cmds.listConnections('%s.msgSingleTest' % node.mNode)==['pCube3'] #cmds returns a list
+        assert node.msgSingleTest==[cube3]
+        assert cmds.listConnections('%s.msgSingleTest' % node.mNode)==['pCube3']  # cmds returns a list
             
     def test_longJsonDumps(self):
         '''
@@ -666,38 +772,75 @@ class Test_MetaClass():
         assert mLambert.color==(1.0, 0.0, 0.5)
         assert cmds.getAttr('lambert1.color')==[(1.0, 0.0, 0.5)]
 
+    def test_convertMClassType(self):
+        '''
+        test the class convert call, designed to mutate a given
+        metaClass to another and re-instantiate it
+        '''
+        # MClass Mutation
+        assert type(self.MClass)==r9Meta.MetaClass
+        converted=r9Meta.convertMClassType(self.MClass,'MetaRig')
+        assert type(converted)==r9Meta.MetaRig
+        assert converted.mClass=='MetaRig'
+        mNodes=r9Meta.getMetaNodes()
+        assert len(mNodes)==1
+        
 
+    def test_referenceHandler(self):
+        #TODO: Fill Test
+        #referenceNode
+        #referencePath
+        #nameSpace
+        #nameSpaceFull
+        #nameSpaceFull(asList=True)
+        pass
+    
+    def test_isSystemRoot(self):
+        #TODO: Fill Test
+        pass
+
+    def test_renameChildLinks(self):
+        #TODO: Fill Test
+        pass
+    
+    
+    
 class Test_Generic_SearchCalls():
     '''
     Basic Generic search calls at scene level
     '''
     def setup(self):
         cmds.file(new=True,f=True)
-        r9Meta.MetaClass(name='MetaClass_Test')
-        r9Meta.MetaRig(name='MetaRig_Test')
-        r9Meta.MetaRigSupport(name='MetaRigSupport_Test')
-        r9Meta.MetaFacialRig(name='MetaFacialRig_Test')
-        r9Meta.MetaFacialRigSupport(name='MetaFacialRigSupport_Test')
+        self.metaA=r9Meta.MetaClass(name='MetaClass_Test')
+        self.metaB=r9Meta.MetaRig(name='MetaRig_Test')
+        self.metaC=r9Meta.MetaRigSupport(name='MetaRigSupport_Test')
+        self.metaD=r9Meta.MetaFacialRig(name='MetaFacialRig_Test')
+        self.metaE=r9Meta.MetaFacialRigSupport(name='MetaFacialRigSupport_Test')
 
     def teardown(self):
         self.setup()
            
     def test_isMetaNode(self):
         assert r9Meta.isMetaNode('MetaRig_Test')
+        assert r9Meta.isMetaNode(self.metaA)
         assert r9Meta.isMetaNode('MetaRig_Test', mTypes=['MetaRig'])
         assert r9Meta.isMetaNode('MetaRig_Test', mTypes='MetaRig')
         assert not r9Meta.isMetaNode('MetaRig_Test', mTypes='MonkeyBollox')
         assert not r9Meta.isMetaNode('MetaRig_Test', mTypes='MetaFacialRigSupport_Test')
         assert r9Meta.isMetaNode('MetaRig_Test', mTypes=[r9Meta.MetaRig])
         assert r9Meta.isMetaNode('MetaRig_Test', mTypes=r9Meta.MetaRig)
+        assert r9Meta.isMetaNode(self.metaB, mTypes=r9Meta.MetaRig)
+        assert not r9Meta.isMetaNode(self.metaB, mTypes=r9Meta.MetaRigSupport)
         cube1=cmds.ls(cmds.polyCube()[0],l=True)[0]
         assert not r9Meta.isMetaNode(cube1)
     
     def test_isMetaNodeInherited(self):
         assert r9Meta.isMetaNodeInherited('MetaFacialRig_Test','MetaRig')
+        assert r9Meta.isMetaNodeInherited(self.metaD, 'MetaRig')
         assert r9Meta.isMetaNodeInherited('MetaFacialRig_Test','MetaClass')
         assert not r9Meta.isMetaNodeInherited('MetaFacialRig_Test','MetaRigSubSystem')
         assert r9Meta.isMetaNodeInherited('MetaFacialRig_Test',r9Meta.MetaRig)
+        assert r9Meta.isMetaNodeInherited(self.metaD, r9Meta.MetaRig)
         assert r9Meta.isMetaNodeInherited('MetaFacialRig_Test',r9Meta.MetaClass)
         assert not r9Meta.isMetaNodeInherited('MetaFacialRig_Test',r9Meta.MetaRigSubSystem)
         
@@ -705,7 +848,7 @@ class Test_Generic_SearchCalls():
         nodes=sorted(r9Meta.getMetaNodes(),key=lambda x: x.mClass.upper())
         assert [n.mClass for n in nodes]==['MetaClass','MetaFacialRig','MetaFacialRigSupport','MetaRig','MetaRigSupport']
     
-    def test_getMetaNodes_mTypes(self):    
+    def test_getMetaNodes_mTypes(self):
         #mTypes test
         nodes=sorted(r9Meta.getMetaNodes(mTypes=['MetaRig','MetaFacialRig']),key=lambda x: x.mClass.upper())
         assert [n.mClass for n in nodes]==['MetaFacialRig','MetaRig']
@@ -721,7 +864,6 @@ class Test_Generic_SearchCalls():
         nodes=r9Meta.getMetaNodes(dataType=None, mTypes=[r9Meta.MetaRig])
         assert nodes==['MetaRig_Test']
         
-        
     def test_getMetaNodes_mInstances(self):
         #mInstances tests
         nodes=r9Meta.getMetaNodes(dataType=None, mInstances=['MetaRig'])
@@ -733,7 +875,7 @@ class Test_Generic_SearchCalls():
                                                   'MetaFacialRigSupport_Test',
                                                   'MetaFacialRig_Test',
                                                   'MetaRigSupport_Test',
-                                                  'MetaRig_Test']  
+                                                  'MetaRig_Test']
     def test_getMetaNodes_mInstancesAsClass(self):
         #mInstances tests passing in Class rather than string
         nodes=r9Meta.getMetaNodes(dataType=None, mInstances=[r9Meta.MetaRig])
@@ -745,11 +887,14 @@ class Test_Generic_SearchCalls():
                                                   'MetaFacialRigSupport_Test',
                                                   'MetaFacialRig_Test',
                                                   'MetaRigSupport_Test',
-                                                  'MetaRig_Test']  
+                                                  'MetaRig_Test']
         
     def test_getMetaNodes_mAttrs(self):
         assert r9Meta.getMetaNodes(mAttrs='version=1')[0].mNodeID=='MetaRig_Test'
                    
+    def test_getMetaNodes_mGrps(self):
+        #TODO: Fill Test
+        pass
                
 class Test_MetaRig():
     
@@ -758,7 +903,7 @@ class Test_MetaRig():
         self.mRig=self.addMetaRig()
         
     def teardown(self):
-        self.setup()   
+        self.setup()
         
     def addMetaRig(self):
         '''
@@ -785,7 +930,7 @@ class Test_MetaRig():
         #Left Leg SubMeta Systems --------------------------
         lLeg= mRig.addMetaSubSystem('Leg', 'Left', nodeName='L_LegSystem')
         lLeg.addRigCtrl('L_Foot_Ctrl','L_Foot', mirrorData={'side':'Left','slot':4})
-        lLeg.addRigCtrl('L_Knee_Ctrl', 'L_Knee',   mirrorData={'side':'Left','slot':5})
+        lLeg.addRigCtrl('L_Knee_Ctrl', 'L_Knee', mirrorData={'side':'Left','slot':5})
         
         #Right Arm SubMeta Systems --------------------------
         rArm= mRig.addMetaSubSystem('Arm', 'Right', nodeName='R_ArmSystem', attr='R_ArmSystem')
@@ -803,19 +948,19 @@ class Test_MetaRig():
         #Right Leg SubMeta System --------------------------
         rLeg= mRig.addMetaSubSystem('Leg', 'Right', nodeName='R_LegSystem', attr='R_LegSystem')
         rLeg.addRigCtrl('R_Foot_Ctrl','R_Foot', mirrorData={'side':'Right','slot':4})
-        rLeg.addRigCtrl('R_Knee_Ctrl', 'R_Knee',   mirrorData={'side':'Right','slot':5})
+        rLeg.addRigCtrl('R_Knee_Ctrl', 'R_Knee', mirrorData={'side':'Right','slot':5})
         
         #Spine SubMeta System -------------------------------
         spine= mRig.addMetaSubSystem('Spine', 'Centre', nodeName='SpineSystem', attr='SpineSystem')
-        spine.addRigCtrl('COG__Ctrl','Root',  mirrorData={'side':'Centre','slot':2})
-        spine.addRigCtrl('Hips_Ctrl','Hips', mirrorData={'side':'Centre','slot':3})  
+        spine.addRigCtrl('COG__Ctrl','Root', mirrorData={'side':'Centre','slot':2})
+        spine.addRigCtrl('Hips_Ctrl','Hips', mirrorData={'side':'Centre','slot':3})
         spine.addRigCtrl('Chest_Ctrl','Chest', mirrorData={'side':'Centre','slot':4})
-        spine.addRigCtrl('Head_Ctrl','Head',  mirrorData={'side':'Centre','slot':5})
+        spine.addRigCtrl('Head_Ctrl','Head', mirrorData={'side':'Centre','slot':5})
 
 
         #add SupportMeta Nodes ------------------------------
         #this is a really basic demo, for the sake of this you could
-        #just wire all the support nodes to one MetaSupport, but this 
+        #just wire all the support nodes to one MetaSupport, but this
         #shows what you could do for really complex setups
         lArm.addSupportMetaNode('L_ArmSupport')
         lArm.L_ArmSupport.addSupportNode('ikHandle1','IKHandle')
@@ -847,7 +992,7 @@ class Test_MetaRig():
         assert mRig.L_ArmSystem.CTRL_L_Wrist[0]=='|World_Ctrl|L_Wrist_Ctrl'
         assert mRig.L_ArmSystem.CTRL_L_Elbow[0]=='|World_Ctrl|COG__Ctrl|L_Elbow_Ctrl'
         ctrl=r9Meta.MetaClass(mRig.L_ArmSystem.CTRL_L_Wrist[0])
-        assert ctrl.mirrorSide==1 #?????? consistency of attrs on node and metaSubsystems!!!!!!!
+        assert ctrl.mirrorSide==1  # ?????? consistency of attrs on node and metaSubsystems!!!!!!!
         assert ctrl.mirrorIndex==1
         
         #test the Right Leg wires
@@ -859,16 +1004,16 @@ class Test_MetaRig():
         assert mRig.R_LegSystem.CTRL_R_Foot[0]=='|World_Ctrl|R_Foot_grp|R_Foot_Ctrl'
         assert mRig.R_LegSystem.CTRL_R_Knee[0]=='|World_Ctrl|R_Knee_Ctrl'
         ctrl=r9Meta.MetaClass(mRig.R_LegSystem.CTRL_R_Foot[0])
-        assert ctrl.mirrorSide==2 #?????? consistency of attrs on node and metaSubsystems!!!!!!!
+        assert ctrl.mirrorSide==2  # ?????? consistency of attrs on node and metaSubsystems!!!!!!!
         assert ctrl.mirrorIndex==4
         
-        #test the Left Leg wires 
+        #test the Left Leg wires
         #:NOTE slight difference in the naming as we didn't pass in the attr when making the subSystem
         assert type(mRig.L_Leg_System)==r9Meta.MetaRigSubSystem
         assert r9Meta.isMetaNode('L_LegSystem')
         assert mRig.L_Leg_System.mNode=='L_LegSystem'
         assert mRig.L_Leg_System.systemType=='Leg'
-        assert mRig.L_Leg_System.mirrorSide==1      
+        assert mRig.L_Leg_System.mirrorSide==1
         
         #test the Spine wires
         assert type(mRig.SpineSystem)==r9Meta.MetaRigSubSystem
@@ -878,7 +1023,7 @@ class Test_MetaRig():
         assert mRig.SpineSystem.CTRL_Hips[0]=='|World_Ctrl|COG__Ctrl|Hips_Ctrl'
         assert mRig.SpineSystem.CTRL_Chest[0]=='|World_Ctrl|COG__Ctrl|Chest_Ctrl'
         ctrl=r9Meta.MetaClass(mRig.SpineSystem.CTRL_Chest[0])
-        assert ctrl.mirrorSide==0 #?????? consistency of attrs on node and metaSubsystems!!!!!!!
+        assert ctrl.mirrorSide==0  # ?????? consistency of attrs on node and metaSubsystems!!!!!!!
         assert ctrl.mirrorIndex==4
         
         #test the MetaRigSupport nodes
@@ -916,10 +1061,10 @@ class Test_MetaRig():
                                     '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_LeftShoulder|Character1_LeftArm|Character1_LeftForeArm|Character1_LeftHand|Character1_LeftHandIndex1',
                                     '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_LeftShoulder|Character1_LeftArm|Character1_LeftForeArm|Character1_LeftHand|Character1_LeftHandMiddle1',
                                     '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_LeftShoulder|Character1_LeftArm|Character1_LeftForeArm|Character1_LeftHand|Character1_LeftHandRing1',
-                                    '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_LeftShoulder|Character1_LeftArm|Character1_LeftForeArm|Character1_LeftHand|Character1_LeftHandPinky1']       
+                                    '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_LeftShoulder|Character1_LeftArm|Character1_LeftForeArm|Character1_LeftHand|Character1_LeftHandPinky1']
        
-        assert self.mRig.R_ArmSystem.getRigCtrls()==['|World_Ctrl|R_Wrist_Ctrl', 
-                                                     '|World_Ctrl|COG__Ctrl|R_Elbow_Ctrl', 
+        assert self.mRig.R_ArmSystem.getRigCtrls()==['|World_Ctrl|R_Wrist_Ctrl',
+                                                     '|World_Ctrl|COG__Ctrl|R_Elbow_Ctrl',
                                                      '|World_Ctrl|COG__Ctrl|Chest_Ctrl|R_Clav_Ctrl']
 
         assert self.mRig.R_ArmSystem.getRigCtrls(walk=True)==['|World_Ctrl|R_Wrist_Ctrl',
@@ -931,20 +1076,29 @@ class Test_MetaRig():
                                                  '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_RightShoulder|Character1_RightArm|Character1_RightForeArm|Character1_RightHand|Character1_RightHandRing1',
                                                  '|Character1_Pelvis|Character1_Spine|Character1_Spine2|Character1_RightShoulder|Character1_RightArm|Character1_RightForeArm|Character1_RightHand|Character1_RightHandPinky1']
        
-        assert self.mRig.R_ArmSystem.getChildren(walk=False)==['|World_Ctrl|R_Wrist_Ctrl', 
-                                                     '|World_Ctrl|COG__Ctrl|R_Elbow_Ctrl', 
-                                                     '|World_Ctrl|COG__Ctrl|Chest_Ctrl|R_Clav_Ctrl']  
+        assert self.mRig.R_ArmSystem.getChildren(walk=False)==['|World_Ctrl|R_Wrist_Ctrl',
+                                                     '|World_Ctrl|COG__Ctrl|R_Elbow_Ctrl',
+                                                     '|World_Ctrl|COG__Ctrl|Chest_Ctrl|R_Clav_Ctrl']
     
     def test_getNodeConnectionMetaDataMap(self):
-        assert self.mRig.getNodeConnectionMetaDataMap('|World_Ctrl|L_Foot_grp|L_Foot_Ctrl') == {'metaAttr': u'CTRL_L_Foot', 'metaNodeID': u'L_LegSystem'} 
+        assert self.mRig.getNodeConnectionMetaDataMap('|World_Ctrl|L_Foot_grp|L_Foot_Ctrl') == {'metaAttr': u'CTRL_L_Foot', 'metaNodeID': u'L_LegSystem'}
     
+    def test_getNodeConnectionMetaDataMap_mTypes(self):
+        #TODO: Fill Test
+        #assert self.mRig.getNodeConnectionMetaDataMap(mTypes=??)
+        pass
+                        
     def test_getNodeConnections(self):
         assert self.mRig.L_Leg_System.getNodeConnections('|World_Ctrl|L_Foot_grp|L_Foot_Ctrl') == ['CTRL_L_Foot']
         
     def test_getChildren_mAttrs(self):
         #TODO: Fill Test
         pass
-          
+    
+    def test_getChildren_asMap(self):
+        #TODO: Fill Test
+        pass
+    
     def test_getConnectedMetaNodes(self):
         #TODO: Fill Test
         pass
@@ -959,9 +1113,47 @@ class Test_MetaRig():
     
     def test_getConnectedMetaNodes_mAttrs(self):
         #TODO: Fill Test
-        pass  
+        pass
     
-           
+    def test_getSkeletonRoots(self):
+        #TODO: Fill Test
+        pass
+    
+    def test_addSupportNode(self):
+        #TODO: Fill Test
+        pass
+    
+    def test_set_ctrlColour(self):
+        #TODO: Fill Test
+        pass
+    
+    def test_mirrorDataHandling(self):
+        #TODO: Fill Test
+        #loadMirrorDataMap
+        #getMirrorData
+        #getMirror_opposites
+        #getMirror_ctrlSets
+        #mirror
+        pass
+    
+    def test_poseCache(self):
+        #poseCacheStore
+        #poseCacheLoad
+        #poseCompare
+        pass
+    
+    def test_nodeVisibility(self):
+        #nodeVisibility
+        #hideNodes
+        #unHideNodes
+        pass
+        
+    def test_attrMap(self):
+        #loadAttrMap
+        #saveAttrMap
+        pass
+    
+    
 class Test_MetaNetworks():
     '''
     Test the network walking and get commands on a larger network
@@ -971,7 +1163,7 @@ class Test_MetaNetworks():
         self.mRig=r9Meta.getMetaNodes(mTypes='MetaRig')[0]
                
     def teardown(self):
-        self.setup()   
+        self.setup()
 
     def buildNetwork(self):
         '''
@@ -1012,7 +1204,7 @@ class Test_MetaNetworks():
                                                  'L_Arm_Support',
                                                  'R_Arm_Support',
                                                  'R_Fingers_System',
-                                                 'L_Fingers_System'] 
+                                                 'L_Fingers_System']
         
         nodes=self.mRig.C_Spine_System.getChildMetaNodes(walk=True)
         assert [node.mNodeID for node in nodes]==['R_Arm_System',
@@ -1022,9 +1214,9 @@ class Test_MetaNetworks():
                                                  'R_Arm_Support',
                                                  'L_Arm_Support',
                                                  'L_Fingers_System',
-                                                 'R_Fingers_System'] 
+                                                 'R_Fingers_System']
                                                   
-        nodes=self.mRig.C_Spine_System.getChildMetaNodes(walk=False) 
+        nodes=self.mRig.C_Spine_System.getChildMetaNodes(walk=False)
         assert [node.mNodeID for node in nodes]==['R_Arm_System','L_Arm_System']
 
         
@@ -1034,7 +1226,28 @@ class Test_MetaNetworks():
         
         assert self.mRig.C_Spine_System.L_Arm_System.getParentMetaNode().mNodeID=='C_Spine_System'
         assert self.mRig.C_Spine_System.L_Arm_System.L_Arm_Support.getParentMetaNode().mNodeID=='L_Arm_System'
+    
+    def test_getConnectedMetaSystemRoot_args(self):
+        #add in a few additional systemRoots and check the filter args
+        assert r9Meta.getConnectedMetaSystemRoot('L_Fingers_System').mNode=='MetaRig'
+        r_legSys=r9Meta.getConnectedMetaNodes('MetaRig')[0]
+        l_legSys=r9Meta.getConnectedMetaNodes('MetaRig')[2]
         
+        #add 2 new mNodes that are effectively now BOTH additional parents to the system
+        newparent1=r9Meta.MetaClass(name='exportNode')
+        newparent2=r9Meta.MetaFacialRig(name='facial')
+        r_legSys.connectParent(newparent1,attr='ExportRoot')
+        l_legSys.connectParent(newparent2,attr='Facial')
+        
+        assert r9Meta.getConnectedMetaSystemRoot('L_Leg_System').mClass=='MetaRig'
+        assert r9Meta.getConnectedMetaSystemRoot('L_Leg_System', mTypes=['MetaFacialRig']).mClass=='MetaFacialRig'
+        
+        assert r9Meta.getConnectedMetaSystemRoot('R_Fingers_System').mClass=='MetaRig'
+        assert not r9Meta.getConnectedMetaSystemRoot('R_Fingers_System', ignoreTypes='MetaRig')
+        
+        assert r9Meta.getConnectedMetaSystemRoot('R_Toes_System').mClass=='MetaClass'
+        assert r9Meta.getConnectedMetaSystemRoot('R_Toes_System', ignoreTypes=['MetaClass']).mClass=='MetaRig'
+                
     def test_getChildMetaNodes_mAttrs(self):
         #TODO: this code needs fixing and then testing!!!!!!
         #self.mRig.getChildMetaNodes(walk=True,mAttrs='ddddddddddddd')
@@ -1046,7 +1259,7 @@ class Test_MetaNetworks():
                                                  'L_Fingers_System',
                                                  'L_Leg_System',
                                                  'L_Toes_System',
-                                                 'L_other_System'] 
+                                                 'L_other_System']
         mNodes=r9Meta.getMetaNodes(mAttrs=['mirrorSide=1','systemType=Arm'])
         assert sorted([node.mNodeID for node in mNodes])==['L_Arm_System']
         
