@@ -95,9 +95,9 @@ def set_language(language='language_english', *args):
 set_language()
 
 
-#=========================================================================================
-# MAYA DATA  -----------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# MAYA DATA  ---
+# -----------------------------------------------------------------------------------------
 
 MAYA_INTERNAL_DATA = {}  # cached Maya internal vars for speed
 
@@ -179,9 +179,9 @@ def getCurrentFPS():
 
   
 
-#=========================================================================================
-# MENU SETUPS ----------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# MENU SETUPS ---
+# -----------------------------------------------------------------------------------------
   
 def menuSetup(parent='MayaWindow'):
     
@@ -539,9 +539,9 @@ def addAudioMenu(parent=None, rootMenu='redNineTraxRoot'):
 
 
 
-#=========================================================================================
-# GENERAL RED9 DATA ----------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# GENERAL RED9 DATA ---
+# -----------------------------------------------------------------------------------------
 
 
 def red9ButtonBGC(colour):
@@ -549,12 +549,15 @@ def red9ButtonBGC(colour):
     Generic setting for the main button colours in the UI's
     '''
     if colour==1 or colour=='green':
-        #return [0.6, 0.9, 0.65]
         return [0.6, 1, 0.6]
     elif colour==2 or colour=='grey':
         return [0.5, 0.5, 0.5]
     elif colour==3 or colour=='red':
         return [1,0.3,0.3]
+    elif colour==4 or colour=='white':
+        return (0.75,0.8,0.8)
+    elif colour==5 or colour=='dark':
+        return (0.15,0.25,0.25)
    
 def red9ContactInfo(*args):
     import Red9.core.Red9_General as r9General  # lazy load
@@ -676,9 +679,9 @@ def get_pro_pack(*args):
             r9General.os_OpenFile('http://red9consultancy.com/')
 
 
-#=========================================================================================
-# BOOT FUNCTIONS -------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# BOOT FUNCTIONS ---
+# -----------------------------------------------------------------------------------------
 
 def addScriptsPath(path):
     '''
@@ -709,12 +712,13 @@ def addPluginPath():
     else:
         log.info('Red9 Plug-in Path already setup')
               
-def addIconsPath():
+def addIconsPath(path=None):
     '''
     Make sure the icons path has been added. If run as a module
     this will have already been added
     '''
-    path=os.path.join(red9ModulePath(),'icons')
+    if not path:
+        path=os.path.join(red9ModulePath(),'icons')
     iconsPath=os.environ.get('XBMLANGPATH')
     
     if not path in iconsPath:
@@ -746,6 +750,12 @@ def addPythonPackages():
         if os.path.exists(pysidePath) and not pysidePath in sys.path:
             sys.path.append(pysidePath)
             log.info('Adding Red9Packages:PySide To Python Paths : %s' % pysidePath)
+            
+    # Python compiled folders, if they exists
+    if mayaVersion()<=2014 and os.path.exists(os.path.join(red9Packages, 'python2.6')):
+        sys.path.append(os.path.join(red9Packages, 'python2.6'))
+    if mayaVersion()>=2015 and os.path.exists(os.path.join(red9Packages, 'python2.7')):
+        sys.path.append(os.path.join(red9Packages, 'python2.7'))
      
 def sourceMelFolderContents(path):
     '''
@@ -756,9 +766,9 @@ def sourceMelFolderContents(path):
         mel.eval('source %s' % script)
 
 
-#=========================================================================================
-# PRO PACK ------------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# PRO PACK ---
+# -----------------------------------------------------------------------------------------
 
 PRO_PACK_STUBS=None
 
@@ -811,9 +821,9 @@ class pro_pack_missing_stub(object):
     
 
 
-#=========================================================================================
-# RED9 PRODUCTION MODULES ----------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# RED9 PRODUCTION MODULES ---
+# -----------------------------------------------------------------------------------------
             
 def has_internal_systems():
     '''
@@ -826,9 +836,9 @@ def internal_module_path():
     return os.path.join(os.path.dirname(os.path.dirname(red9ModulePath())),'Red9_Internals')
 
 
-#=========================================================================================
-# CLIENT MODULES -------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# CLIENT MODULES ---
+# -----------------------------------------------------------------------------------------
 
 def client_core_path():
     return os.path.join(os.path.dirname(os.path.dirname(red9ModulePath())),'Red9_ClientCore')
@@ -866,9 +876,9 @@ def boot_client_projects():
         
 
 
-#=========================================================================================
-# BOOT CALL ------------------------------------------------------------------------------
-#=========================================================================================
+# -----------------------------------------------------------------------------------------
+# BOOT CALL ---
+# -----------------------------------------------------------------------------------------
     
 def start(Menu=True, MayaUIHooks=True, MayaOverloads=True, parentMenu='MayaWindow'):
     '''
