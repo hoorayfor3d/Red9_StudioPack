@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
-
+#---------------------------------------------------------------------------------
 # Generic Utility Functions ---
 #---------------------------------------------------------------------------------
 
@@ -163,44 +163,48 @@ def getScriptEditorSelection():
         return func
 
 
-
+#---------------------------------------------------------------------------------
 # Context Managers and Decorators ---
 #---------------------------------------------------------------------------------
 
 def Timer(func):
     '''
-    Simple timer decorator
+    DECORATOR : Simple timer function
     '''
     @wraps(func)
     def wrapper(*args, **kws):
-        t1 = time.time()
-        res=func(*args, **kws)
-        t2 = time.time()
-
-        functionTrace=''
-        try:
-            #module if found
-            mod = inspect.getmodule(args[0])
-            functionTrace+='%s >>' % mod.__name__.split('.')[-1]
-        except:
-            log.debug('function module inspect failure')
-        try:
-            #class function is part of, if found
-            cls = args[0].__class__
-            functionTrace+='%s.' % args[0].__class__.__name__
-        except:
-            log.debug('function class inspect failure')
-        functionTrace += func.__name__
-        log.debug('TIMER : %s: took %0.3f ms' % (functionTrace, (t2 - t1) * 1000.0))
-        #log.info('%s: took %0.3f ms' % (func.func_name, (t2-t1)*1000.0))
+        if log.getEffectiveLevel()==20:
+            # Timer Disabled as we're in log.Info mode so the data isn't used
+            res=func(*args, **kws)
+        else:
+            t1 = time.time()
+            res=func(*args, **kws)
+            t2 = time.time()
+    
+            functionTrace=''
+            try:
+                #module if found
+                mod = inspect.getmodule(args[0])
+                functionTrace+='%s >>' % mod.__name__.split('.')[-1]
+            except:
+                log.debug('function module inspect failure')
+            try:
+                #class function is part of, if found
+                cls = args[0].__class__
+                functionTrace+='%s.' % args[0].__class__.__name__
+            except:
+                log.debug('function class inspect failure')
+            functionTrace += func.__name__
+            log.debug('TIMER : %s: took %0.3f ms' % (functionTrace, (t2 - t1) * 1000.0))
+            #log.info('%s: took %0.3f ms' % (func.func_name, (t2-t1)*1000.0))
         return res
     return wrapper
 
 
 def runProfile(func):
     '''
-    run the profiler - only ever used when debugging /optimizing function call speeds.
-    visualize the data using 'runsnakerun' to view the profiles and debug
+    DECORATOR : run the profiler - only ever used when debugging /optimizing 
+    function call speeds.visualize the data using 'runsnakerun' to view the profiles and debug
     '''
     import cProfile
     from time import gmtime, strftime
@@ -214,37 +218,121 @@ def runProfile(func):
         profile = cProfile.runctx("command()", globals(), locals(), dumpFileName)
         return profile
     return wrapper
+
+
+def evalManager_DG(func):
+    '''
+    DECORATOR : simple decorator to call the evalManager_switch plugin 
+    and run the enclosed function in DG eval mode NOT parallel. 
     
+    .. note:: 
+        Parallel EM mode is slow at evaluating time, DG is up to 3 times faster!
+        The plugin call is registered back in the undoStack, cmds.evalmanager call is not
+    '''
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            evalmode=None
+            if r9Setup.mayaVersion()>=2016:
+                evalmode=cmds.evaluationManager(mode=True,q=True)[0]
+                if evalmode=='parallel':
+                    evalManagerState(mode='off')
+            res = func(*args, **kwargs)
+        except:
+            log.info('Failed on evalManager_DG decorator')
+        finally:
+            if evalmode:
+                evalManagerState(mode=evalmode)
+        return res
+    return wrapper
+
+
+def evalManagerState(mode='off'):
+    '''
+    wrapper function for the evalManager so that it's switching is recorded in 
+    the undo stack via the Red9.evalManager_switch plugin
+    '''
+    if r9Setup.mayaVersion()>=2016:
+        if not cmds.pluginInfo('evalManager_switch', q=True, loaded=True):
+            try:
+                cmds.loadPlugin('evalManager_switch')
+            except:
+                log.warning('Plugin Failed to load : evalManager_switch')
+        try:
+            # via the plug-in to register the switch to the undoStack
+            cmds.evalManager_switch(mode=mode)
+        except:
+            log.debug('evalManager_switch plugin not found, running native Maya evalManager command')
+            cmds.evaluationManager(mode=mode)  # run the default maya call instead
+        log.debug('EvalManager - switching state : %s' % mode)
+    else:
+        log.debug("evalManager skipped as you're in an older version of Maya")
     
+
 class AnimationContext(object):
     """
-    Simple Context Manager for restoring Animation settings
+    CONTEXT MANAGER : Simple Context Manager for restoring Animation settings
+    
+    :param evalmanager: do we manage the evalManager in this context for Maya 2016 onwards
+    :param time: do we manage the time and restore the original currentTime?
+    :param undo: do we manage the undoStack, collecting everything in one chunk
     """
-    def __init__(self):
+    def __init__(self, evalmanager=True, time=True, undo=True):
         self.autoKeyState=None
-        self.timeStore=None
+        self.timeStore={}
+        self.evalmode=None
+        
+        self.manage_em=evalmanager
+        self.mangage_undo=undo
+        self.manage_time=time
         
     def __enter__(self):
         self.autoKeyState=cmds.autoKeyframe(query=True, state=True)
-        self.timeStore=cmds.currentTime(q=True)
-        cmds.undoInfo(openChunk=True)
+        self.timeStore['currentTime'] = cmds.currentTime(q=True)
+        self.timeStore['minTime'] = cmds.playbackOptions(q=True, min=True)
+        self.timeStore['maxTime'] = cmds.playbackOptions(q=True, max=True)
+        self.timeStore['startTime'] = cmds.playbackOptions(q=True, ast=True)
+        self.timeStore['endTime'] = cmds.playbackOptions(q=True, aet=True)
+        self.timeStore['playSpeed'] = cmds.playbackOptions(query=True, playbackSpeed=True)
+
+        if self.mangage_undo:
+            cmds.undoInfo(openChunk=True)
+        else:
+            cmds.undoInfo(swf=False)
+        if self.manage_em:
+            if r9Setup.mayaVersion()>=2016:
+                self.evalmode=cmds.evaluationManager(mode=True,q=True)[0]
+                if self.evalmode=='parallel':
+                    evalManagerState(mode='off')
 
     def __exit__(self, exc_type, exc_value, traceback):
         # Close the undo chunk, warn if any exceptions were caught:
         cmds.autoKeyframe(state=self.autoKeyState)
-        cmds.currentTime(self.timeStore)
         log.info('autoKeyState restored: %s' % self.autoKeyState)
-        log.info('currentTime restored: %f' % self.timeStore)
-        cmds.undoInfo(closeChunk=True)
+        
+        if self.manage_em and self.evalmode:
+            evalManagerState(mode=self.evalmode)
+            log.info('evalManager restored: %s' % self.evalmode)
+        if self.manage_time:
+            cmds.currentTime(self.timeStore['currentTime'])
+            cmds.playbackOptions(min=self.timeStore['minTime'])
+            cmds.playbackOptions(max=self.timeStore['maxTime'])
+            cmds.playbackOptions(ast=self.timeStore['startTime'])
+            cmds.playbackOptions(aet=self.timeStore['endTime'])
+            cmds.playbackOptions(ps=self.timeStore['playSpeed'])
+            log.info('currentTime restored: %f' % self.timeStore['currentTime'])
+        if self.mangage_undo:
+            cmds.undoInfo(closeChunk=True)
+        else:
+            cmds.undoInfo(swf=True)
         if exc_type:
             log.exception('%s : %s'%(exc_type, exc_value))
         # If this was false, it would re-raise the exception when complete
         return True
     
-
 class undoContext(object):
     """
-    Simple Context Manager for chunking the undoState
+    CONTEXT MANAGER : Simple Context Manager for chunking the undoState
     """
     def __init__(self, initialUndo=False, undoFuncCache=[], undoDepth=1):
         '''
@@ -261,7 +349,7 @@ class undoContext(object):
         :param undoFuncCache: only if initialUndo = True : functions to catch in the undo stack
         :param undoDepth: only if initialUndo = True : depth of the undo stack to go to
         
-        .. note ::
+        .. note::
             When adding funcs to this you CAN'T call the 'dc' command on any slider with a lambda func,
             it has to call a specific func to catch in the undoStack. See Red9_AnimationUtils.FilterCurves
             code for a live example of this setup.
@@ -291,14 +379,17 @@ class undoContext(object):
 
 class ProgressBarContext(object):
     '''
-    Context manager to make it easier to wrap progressBars
+    CONTEXT MANAGER : Context manager to make it easier to wrap progressBars
+    
+    :param maxValue: max value used in the progress
+    :param interruptable: if the progress is interruptable / escapable
+    :param step: step used in the progress bar
+    :param ismain: if we use the main progressBar OR a progressWindow to view the progress
+    :param title: only valid if ismain=False, used as the progressUI window title
     
     >>> #Example of using this in code
     >>> 
-    >>> step=5
-    >>> progressBar=r9General.ProgressBarContext(1000)
-    >>> progressBar.setStep(step)
-    >>> count=0
+    >>> progressBar=r9General.ProgressBarContext(maxValue=1000, step=1)
     >>> 
     >>> #now do your code but increment and check the progress state
     >>> with progressBar:
@@ -306,12 +397,12 @@ class ProgressBarContext(object):
     >>>        if progressBar.isCanceled():
     >>>             print 'process cancelled'
     >>>             return
-    >>>         progressBar.setProgress(count)
-    >>>         count+=step
+    >>>         progressBar.updateProgress()
     
     '''
-    def __init__(self, maxValue=100, interruptable=True):
+    def __init__(self, maxValue=100, interruptable=True, step=1, ismain=True, title=''):
         self.disable=False
+        self.ismain=ismain
         if r9Setup.mayaIsBatch():
             self.disable=True
             return
@@ -320,28 +411,60 @@ class ProgressBarContext(object):
             raise ValueError("Max has to be greater than 0")
         self._maxValue = maxValue
         self._interruptable = interruptable
-        
         self._gMainProgressBar = mel.eval('$gmtmp = $gMainProgressBar')
+        self.title=title
+        self.step=step
                 
     def isCanceled(self):
         if not self.disable:
-            return cmds.progressBar(self._gMainProgressBar, query=True, isCancelled=True)
+            if self.ismain:
+                return cmds.progressBar(self._gMainProgressBar, query=True, isCancelled=True)
+            else:
+                return cmds.progressWindow(query=True, isCancelled=True)
 
     def setText(self, text):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, status=text)
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, status=text)
+            else:
+                cmds.progressWindow(edit=True, status=text)
 
     def setMaxValue(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, maxValue=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, maxValue=int(value))
+            else:
+                cmds.progressWindow(edit=True, maxValue=int(value))
         
     def setStep(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, step=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, step=int(value))
+            else:
+                cmds.progressWindow(edit=True, step=int(value))
     
     def setProgress(self, value):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, progress=int(value))
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, progress=int(value))
+            else:
+                cmds.progressWindow(edit=True, progress=int(value))
+    
+    def getProgress(self):
+        if not self.disable:
+            if self.ismain:
+                return cmds.progressBar(self._gMainProgressBar, q=True, progress=True) or  0
+            else:
+                return cmds.progressWindow(q=True, progress=True) or 0
+                
+    def updateProgress(self):
+        '''
+        more simplistic way to just update the progress. Previously we generate a
+        counter and used that with the setProgress() call, this is a far better way
+        to do it
+        '''
+        if not self.disable:
+            self.setProgress(self.getProgress() + self.step)
         
     def reset(self):
         if not self.disable:
@@ -350,25 +473,34 @@ class ProgressBarContext(object):
 
     def __enter__(self):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar,
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar,
                               edit=True,
                               beginProgress=True,
-                              step=1,
+                              step=self.step,
                               isInterruptable=self._interruptable,
                               maxValue=self._maxValue)
-    
+            else:
+                cmds.progressWindow(step=self.step,
+                                title=self.title,
+                                isInterruptable=self._interruptable,
+                                maxValue=self._maxValue)
+                
     def __exit__(self, exc_type, exc_value, traceback):
         if not self.disable:
-            cmds.progressBar(self._gMainProgressBar, edit=True, endProgress=True)
+            if self.ismain:
+                cmds.progressBar(self._gMainProgressBar, edit=True, endProgress=True)
+            else:
+                cmds.progressWindow(endProgress=True)
             if exc_type:
                 log.exception('%s : %s'%(exc_type, exc_value))
             del(self)
-            return False  # False so that the exceptiopn gets re-raised
+            return False  # False so that the exception gets re-raised
     
        
 class HIKContext(object):
     """
-    Simple Context Manager for restoring HIK Animation settings and managing HIK callbacks
+    CONTEXT MANAGER : Simple Context Manager for restoring HIK Animation settings and managing HIK callbacks
     """
     def __init__(self, NodeList):
         self.objs=cmds.ls(sl=True, l=True)
@@ -407,7 +539,7 @@ class HIKContext(object):
     
 class SceneRestoreContext(object):
     """
-    Simple Context Manager for restoring Scene Global settings
+    CONTEXT MANAGER : Simple Context Manager for restoring Scene Global settings
     
     Basically we store the state of all the modelPanels and timeLine
     setups. Think of it like this, you export a scene, file -new, then re-import it
@@ -551,7 +683,7 @@ class SceneRestoreContext(object):
         log.debug('Scene Restored fully')
         return True
     
-                    
+#---------------------------------------------------------------------------------               
 # General ---
 #---------------------------------------------------------------------------------
 
@@ -662,7 +794,7 @@ def getModifier():
     else:
         return False
 
-    
+#---------------------------------------------------------------------------------
 # OS functions ---
 #---------------------------------------------------------------------------------
 
@@ -787,13 +919,14 @@ def os_listFiles(folder, filters=[], byDate=False, fullPath=False):
     :param folder: folder to dir list
     :param filters: list of file extensions to filter for
     :param byData: sort the list by modified date, newest first!
+    :param fullPath: return either the fully matched path or just the files that match
     '''
     files = os.listdir(folder)
     filtered=[]
     if filters:
         for f in files:
             for flt in filters:
-                if f.lower().endswith(flt):
+                if f.lower().endswith(flt.lower()):
                     filtered.append(f)
         files=filtered
     if byDate and files:

@@ -94,7 +94,7 @@ class Test_MetaCache():
         
     def test_uuid(self):
         a=r9Meta.MetaRig(name='rig')
-        UUID = a.UUID
+        UUID = a.getUUID()  # a.UUID
         assert UUID in r9Meta.RED9_META_NODECACHE
         
         #test the duplicate handler
@@ -104,7 +104,7 @@ class Test_MetaCache():
         assert len(nodes)==2
         assert len(r9Meta.RED9_META_NODECACHE.keys()) == 2
         assert r9Meta.RED9_META_NODECACHE[UUID]==a
-        assert r9Meta.MetaClass(a.mNode).UUID == UUID
+        assert r9Meta.MetaClass(a.mNode).getUUID() == UUID
     
     def test_wrappedMayaNodes(self):
         '''
@@ -112,8 +112,13 @@ class Test_MetaCache():
         '''
         cmds.polyCube(name='cube1')
         n1 = r9Meta.MetaClass('|cube1')
+        UUID=cmds.ls(n1.mNode, uuid=True)[0]
         r9Meta.registerMClassNodeCache(n1)
-        assert r9Meta.RED9_META_NODECACHE['|cube1']==n1
+        # from 2016 the UUID is the key for all nodes in the Cache
+        if r9Setup.mayaVersion()>=2016:
+            assert r9Meta.RED9_META_NODECACHE[UUID]==n1
+        else:
+            assert r9Meta.RED9_META_NODECACHE['|cube1']==n1
         n1.rename('renamedCube1')
         assert n1.mNode=='|renamedCube1'
         
@@ -122,10 +127,15 @@ class Test_MetaCache():
         #the MOBject to ensure that things are still correct in the pull
         cmds.polyCube(name='cube1')
         n2 = r9Meta.MetaClass('|cube1')
+        UUID=cmds.ls(n2.mNode, uuid=True)[0]
         assert n2.mNode=='|cube1'
         assert not n2.mNode=='renamedCube1'
         r9Meta.registerMClassNodeCache(n2)
-        assert r9Meta.RED9_META_NODECACHE['|cube1']==n2
+        if r9Setup.mayaVersion()>=2016:
+            assert r9Meta.RED9_META_NODECACHE[UUID]==n2
+        else:
+            assert r9Meta.RED9_META_NODECACHE['|cube1']==n2
+
         
     def test_joshs_bastard_error(self):
         '''
@@ -180,12 +190,13 @@ class Test_MetaClass():
         assert isinstance(new,r9Meta.MetaRig)
         assert self.MClass.mClass=='MetaRig'
         
+        #isReferenced
+        assert not self.MClass.isReferenced()
+        
         #delete
         self.MClass.delete()
         assert not cmds.objExists('MetaClass_Test')
         
-        #isReferenced ?? Why is this failing ??
-        assert not self.MClass.isReferenced()
     
     def test_isValid(self):
         assert self.MClass.isValid()  # strange one, isValid fails if the mNode has no connections.... is this a good decision?
@@ -286,21 +297,21 @@ class Test_MetaClass():
         master1.connectChildren([child1,child2,cube],'modules','puppet')
         assert cmds.attributeQuery('modules', node=master1.mNode, m=True)
         assert cmds.attributeQuery('modules', node=master1.mNode, im=True)
-        assert master1.modules==['|pCube1',child1,child2]
+        assert sorted(master1.modules)==sorted(['|pCube1',child1,child2])
         assert child1.puppet==[master1]
         assert child2.puppet==[master1]
         assert cmds.attributeQuery('puppet', node=cube, m=True)
-        assert not cmds.attributeQuery('puppet', node=cube, im=True)
+        #assert not cmds.attributeQuery('puppet', node=cube, im=True)  # If we switch to 'allow_incest' as default then this is no longer valid!
         assert cmds.listConnections('%s.puppet' % cube)==['master1']
         
         #mClass mNode being passed in
         master2.connectChildren([child1.mNode,child2.mNode,cube],'time','master',force=True)
-        assert master2.time==['|pCube1', child1, child2]
+        assert sorted(master2.time)==sorted(['|pCube1', child1, child2])
         assert child1.master==[master2]
         assert child2.master==[master2]
         assert cmds.listConnections('%s.master' % cube)==['master2']
         #check previous
-        assert master1.modules==['|pCube1',child1,child2]
+        assert sorted(master1.modules)==sorted(['|pCube1',child1,child2])
         assert child1.puppet==[master1]
         assert child2.puppet==[master1]
         assert cmds.listConnections('%s.puppet' % cube)==['master1']
@@ -310,9 +321,9 @@ class Test_MetaClass():
         assert sorted(child1.master,key=lambda x:x.mNode)== [master1, master2]
         assert sorted(child2.master,key=lambda x:x.mNode)== [master1, master2]
         #check previous
-        assert master2.time==['|pCube1', child1, child2]
+        assert sorted(master2.time)==sorted(['|pCube1', child1, child2])
         assert cmds.listConnections('%s.master' % cube)==['master2']
-        assert master1.modules==['|pCube1', child1, child2]
+        assert sorted(master1.modules)==sorted(['|pCube1', child1, child2])
         assert child1.puppet==[master1]
         assert child2.puppet==[master1]
         assert cmds.listConnections('%s.puppet' % cube)==['master1']
@@ -327,18 +338,18 @@ class Test_MetaClass():
         assert master1.time==[child1]
         assert child2.master==[master2]
         #check previous
-        assert master1.modules==['|pCube1',child1,child2]
-        assert master2.time==['|pCube1', child1, child2]
+        assert sorted(master1.modules)==sorted(['|pCube1',child1,child2])
+        assert sorted(master2.time)==sorted(['|pCube1', child1, child2])
         
         master1.disconnectChild(child1)
-        assert master1.modules==['|pCube1',child2]
+        assert sorted(master1.modules)==sorted(['|pCube1',child2])
         assert not master1.hasAttr('time')  # cleaned the plug
         assert child1.master==[master2]
         assert child1.hasAttr('puppet')  # ???? FIXME: this is wrong, it should have been cleaned as it's now empty!
         #assert not child1.puppet
         
         #check previous
-        assert master2.time==['|pCube1', child1, child2]
+        assert sorted(master2.time)==sorted(['|pCube1', child1, child2])
         
         #isChildNode test calls
         assert master1.isChildNode(child2.mNode)
@@ -371,10 +382,12 @@ class Test_MetaClass():
     
         #connect something else to Singluar - cleanCurrent=True by default so unhook cube1
         self.MClass.connectChild(cube2,'Singluar')
+        print self.MClass.Singluar,'  : mclass.Singular'
         assert self.MClass.Singluar==[cube2]
         assert not cmds.attributeQuery('MetaClassTest',node=cube1,exists=True)  # cleaned up after ourselves?
         self.MClass.connectChildren([cube3,cube4],'Singluar')
-        assert sorted(self.MClass.Singluar)==[cube2,cube3,cube4]
+        print sorted(self.MClass.Singluar), [cube2,cube3,cube4]
+        assert sorted(self.MClass.Singluar)==sorted([cube2,cube3,cube4])
         
         #setAttr has cleanCurrent and force set to true so remove all current connections to this attr
         self.MClass.Singluar=cube1
@@ -387,7 +400,7 @@ class Test_MetaClass():
             assert True
         
         self.MClass.Multiple=[cube1,cube4]
-        assert sorted(self.MClass.Multiple)==[cube1,cube4]
+        assert sorted(self.MClass.Multiple)==sorted([cube1,cube4])
     
     def test_connections_called_from_wrappedMClass(self):
         '''
@@ -737,6 +750,7 @@ class Test_MetaClass():
         assert cmds.attributeQuery('msgSingleTest',node=node.mNode, multi=True)==False
         
         #NOTE : cmds returns shortName, but all MetaClass attrs are always longName
+        print cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)
         assert cmds.listConnections('%s.msgMultiTest' % node.mNode,c=True,p=True)==['MetaClass_Test.msgMultiTest',
                                                                  'pCube2.MetaClass_Test',
                                                                  'MetaClass_Test.msgMultiTest',
@@ -1199,7 +1213,6 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill=False) for p in cubes]
         print 'SPEED: Standard Wrapped Nodes : autofill=False: %s' % str(time.clock() - now)
-        print 'Timer should be around 4.26 secs on work PC'
         print 'Timer should be around 2.28 secs on the Beast'  #3.28
         
         # verify against pymel, I know we're still a lot slower
@@ -1212,7 +1225,6 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in cubes]
         print 'SPEED: Standard Wrapped Nodes : autofill=all : %s' % str(time.clock() - now)
-        print 'Timer should be around 14.6 secs on work PC'
         print 'Timer should be around 9.04 secs on the Beast'  #10.48
 
         assert False
@@ -1225,14 +1237,12 @@ class Test_SpeedTesting():
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in nodes]
         print 'SPEED: Meta Nodes : autofill=all : %s' % str(time.clock() - now)
-        print 'Timer should be around 8.5 secs on work PC'
-        print 'Timer should be around 11.93 secs on the Beast'
+        print 'Timer should be around 8.5 secs on the Beast'
         print '\n'
         
         now = time.clock()
         c = [r9Meta.MetaClass(p, autofill='all') for p in nodes]
         print 'SPEED: Meta Nodes from Cache :  %s' % str(time.clock() - now)
-        print 'Timer should be around 8.5 secs on work PC'
         print 'Timer should be around 3.25 secs on the Beast'
         print '\n'
         
@@ -1240,8 +1250,7 @@ class Test_SpeedTesting():
         
         c = [r9Meta.MetaClass(p, autofill=False) for p in nodes]
         print 'SPEED: Meta Nodes : autofill=False : %s' % str(time.clock() - now)
-        print 'Timer should be around 8.5 secs on work PC'
-        print 'Timer should be around 10.82 secs on the Beast'
+        print 'Timer should be around 8.5 secs on the Beast'
         assert False
         
  

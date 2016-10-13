@@ -79,15 +79,19 @@ def getNodesOverload(poseObj, nodes, *args):
     metaNode = poseObj.metaRig
     currentSelection = cmds.ls(sl=True, l=True)
     filteredNodes=[]
+    
     if not issubclass(type(metaNode), r9Meta.MetaHIKControlSetNode):
         # see if we have a left or right controller selected and switch to the
         # appropriate subMetaSystem
+        
         if cmds.getAttr('%s.mirrorSide' % currentSelection[0]) == 1:
-            filteredNodes = metaNode.L_ArmSystem.L_Fingers_System.getChildren()
+            print '\nFinger : PoseOverload Handler : %s >> side: Left' % metaNode
+            filteredNodes = metaNode.L_ArmSystem.L_FingerSystem.getChildren()
             [filteredNodes.append(node) for node in cmds.listRelatives(filteredNodes, type='joint', ad=True, f=True)]
             
         elif cmds.getAttr('%s.mirrorSide' % currentSelection[0]) == 2:
-            filteredNodes = metaNode.R_ArmSystem.R_Fingers_System.getChildren()
+            print '\nFinger : PoseOverload Handler : %s >> side: Right' % metaNode
+            filteredNodes = metaNode.R_ArmSystem.R_FingerSystem.getChildren()
             [filteredNodes.append(node) for node in cmds.listRelatives(filteredNodes, type='joint', ad=True, f=True)]
     else:
         if currentSelection[0] == metaNode.LeftWristEffector or currentSelection[0] == metaNode.LeftHand:
